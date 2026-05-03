@@ -11,16 +11,58 @@ import {
 const AUTH_KEY = "staff_auth";
 const DATA_KEY = "clan_data";
 
-// Ensure all fields exist (Firebase strips empty arrays)
+// Firebase converts arrays to objects with numeric keys — convert back
+function toArr(val) {
+  if (Array.isArray(val)) return val;
+  if (val && typeof val === "object" && !Array.isArray(val)) {
+    const keys = Object.keys(val);
+    if (keys.length > 0 && keys.every(k => !isNaN(k))) return Object.values(val);
+  }
+  return [];
+}
+
+// Ensure all fields exist and are proper arrays
 function sanitize(d) {
   if (!d || typeof d !== "object") return { ...DEFAULT_DATA };
-  return {
-    members: Array.isArray(d.members) ? d.members : [],
-    events: Array.isArray(d.events) ? d.events : [],
-    twWeeks: Array.isArray(d.twWeeks) ? d.twWeeks : [],
-    lentAccounts: Array.isArray(d.lentAccounts) ? d.lentAccounts : [],
-    twPTs: d.twPTs && typeof d.twPTs === "object" ? d.twPTs : {},
-  };
+  const members = toArr(d.members).map(m => ({
+    ...m,
+    id: m.id || Date.now(),
+    name: m.name || "",
+    class: m.class || "WR",
+    level: m.level || 100,
+    cultivo: m.cultivo || "Nenhum",
+    whatsapp: m.whatsapp || "",
+  }));
+  const events = toArr(d.events).map(e => ({
+    ...e,
+    id: e.id || Date.now(),
+    name: e.name || "",
+    type: e.type || "TW",
+    date: e.date || "",
+    present: toArr(e.present),
+  }));
+  const twWeeks = toArr(d.twWeeks).map(w => ({
+    ...w,
+    id: w.id || Date.now(),
+    label: w.label || "",
+    confirmed: toArr(w.confirmed),
+    declined: toArr(w.declined),
+  }));
+  const lentAccounts = toArr(d.lentAccounts).map(a => ({
+    ...a,
+    id: a.id || Date.now(),
+  }));
+  const twPTs = d.twPTs && typeof d.twPTs === "object" && !Array.isArray(d.twPTs) ? d.twPTs : {};
+  // Also sanitize PT players inside twPTs
+  Object.keys(twPTs).forEach(key => {
+    twPTs[key] = toArr(twPTs[key]).map(pt => ({
+      ...pt,
+      id: pt.id || Date.now(),
+      name: pt.name || "PT",
+      players: toArr(pt.players),
+    }));
+  });
+  return { members, events, twWeeks, lentAccounts, twPTs };
 }
 
 // Safe class color (fallback for unknown classes)
