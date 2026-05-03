@@ -389,6 +389,8 @@ function ClassChart({ members }) {
 /* ═══════════════ EVENTS ═══════════════ */
 function EventsTab({ data, save }) {
   const [show, setShow] = useState(false);
+  const [expanded, setExpanded] = useState({});
+  const [showRanking, setShowRanking] = useState(true);
   const blank = {name:"",type:EVENT_TYPES[0],date:"",present:[]};
   const [form, setForm] = useState(blank);
   const submit = () => { if(!form.name.trim()||!form.date) return; save({...data,events:[...data.events,{...form,id:Date.now()}]}); setForm(blank); setShow(false); };
@@ -396,55 +398,131 @@ function EventsTab({ data, save }) {
   const togglePresent = (evId,mId) => {
     save({...data,events:data.events.map(e=>{ if(e.id!==evId) return e; const p=e.present||[]; return {...e,present:p.includes(mId)?p.filter(x=>x!==mId):[...p,mId]}; })});
   };
+  const toggleExpand = (id) => setExpanded(e=>({...e,[id]:!e[id]}));
   const sorted=[...(data.events||[])].sort((a,b)=>b.date.localeCompare(a.date));
   const months=["JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET","OUT","NOV","DEZ"];
   const typeBadge={"TW":"b-red","World Boss":"b-gold","Marcial":"b-blue"};
 
+  // Attendance ranking
+  const totalEvents = (data.events||[]).length;
+  const ranking = data.members.map(m => {
+    const attended = (data.events||[]).filter(e => (e.present||[]).includes(m.id)).length;
+    return { ...m, attended, pct: totalEvents > 0 ? Math.round(attended/totalEvents*100) : 0 };
+  }).sort((a,b) => b.attended - a.attended);
+
+  // Per-type breakdown
+  const getTypeCount = (m, type) => (data.events||[]).filter(e => e.type === type && (e.present||[]).includes(m.id)).length;
+  const getTypeTotal = (type) => (data.events||[]).filter(e => e.type === type).length;
+
   return (
-    <div className="card">
-      <div className="card-t">
-        <span>Presenças em Eventos</span>
-        <button className="btn" onClick={()=>setShow(!show)}>{Ico.plus} Novo Evento</button>
-      </div>
-      {show&&(
-        <div className="form-box">
-          <div className="fr">
-            <div className="fg"><label>Nome do Evento</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Ex: TW vs Phoenix"/></div>
-            <div className="fg"><label>Tipo</label><select value={form.type} onChange={e=>setForm({...form,type:e.target.value})}>{EVENT_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
-            <div className="fg"><label>Data</label><input type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/></div>
+    <div>
+      {/* RANKING CARD */}
+      {data.members.length > 0 && totalEvents > 0 && (
+        <div className="card" style={{marginBottom:14}}>
+          <div className="card-t" style={{cursor:"pointer"}} onClick={()=>setShowRanking(!showRanking)}>
+            <span style={{display:"flex",alignItems:"center",gap:8}}>{Ico.trophy} Ranking de Presença</span>
+            <span style={{display:"flex",alignItems:"center",gap:8}}>
+              <span className="badge b-gold">{totalEvents} eventos</span>
+              {showRanking ? Ico.chevDown : Ico.chevRight}
+            </span>
           </div>
-          <button className="btn" onClick={submit}>{Ico.check} Criar Evento</button>
+          {showRanking && (
+            <div className="tbl"><table>
+              <thead><tr><th>#</th><th>Nome</th><th>Classe</th><th>TW</th><th>W.Boss</th><th>Marcial</th><th>Total</th><th>%</th></tr></thead>
+              <tbody>
+                {ranking.map((m,i)=>{
+                  const twC = getTypeCount(m,"TW"), wbC = getTypeCount(m,"World Boss"), mcC = getTypeCount(m,"Marcial");
+                  const twT = getTypeTotal("TW"), wbT = getTypeTotal("World Boss"), mcT = getTypeTotal("Marcial");
+                  const medalColor = i===0?"#FFD700":i===1?"#C0C0C0":i===2?"#CD7F32":null;
+                  return (
+                    <tr key={m.id}>
+                      <td style={{fontFamily:"'Cinzel',serif",fontWeight:700,color:medalColor||"var(--text-d)",fontSize:medalColor?".95rem":".8rem"}}>
+                        {i<3 ? ["🥇","🥈","🥉"][i] : i+1}
+                      </td>
+                      <td style={{fontWeight:600}}>{m.name}</td>
+                      <td><span className="badge" style={{background:CLASS_COLORS[m.class]+"22",color:CLASS_COLORS[m.class],border:`1px solid ${CLASS_COLORS[m.class]}55`}}>{m.class}</span></td>
+                      <td style={{fontSize:".8rem"}}>{twT>0?<span style={{color:twC>0?"var(--text)":"var(--text-d)"}}>{twC}/{twT}</span>:"—"}</td>
+                      <td style={{fontSize:".8rem"}}>{wbT>0?<span style={{color:wbC>0?"var(--text)":"var(--text-d)"}}>{wbC}/{wbT}</span>:"—"}</td>
+                      <td style={{fontSize:".8rem"}}>{mcT>0?<span style={{color:mcC>0?"var(--text)":"var(--text-d)"}}>{mcC}/{mcT}</span>:"—"}</td>
+                      <td style={{fontWeight:600}}>{m.attended}/{totalEvents}</td>
+                      <td>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <div style={{width:50,height:6,background:"var(--border)",borderRadius:3,overflow:"hidden"}}>
+                            <div style={{width:m.pct+"%",height:"100%",background:m.pct>=75?"var(--green-l)":m.pct>=50?"var(--gold)":"var(--red-l)",borderRadius:3,transition:"width .3s"}}/>
+                          </div>
+                          <span style={{fontSize:".75rem",color:m.pct>=75?"var(--green-l)":m.pct>=50?"var(--gold)":"var(--red-l)",fontWeight:600}}>{m.pct}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table></div>
+          )}
         </div>
       )}
-      {data.members.length===0?<div className="empty">Cadastre membros na aba Membros primeiro.</div>
-        :sorted.length===0?<div className="empty">Nenhum evento criado ainda.</div>
-        :sorted.map(ev=>{
-          const d=new Date(ev.date+"T12:00"); const present=ev.present||[]; const presCount=present.length; const ausCount=data.members.length-presCount;
-          return (
-            <div key={ev.id} style={{marginBottom:14,background:"var(--bg-i)",border:"1px solid var(--border)",borderRadius:4,padding:14}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",marginBottom:10,flexWrap:"wrap",gap:8}}>
-                <div>
-                  <div style={{fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:".95rem",marginBottom:2}}>{ev.name}</div>
-                  <div style={{fontSize:".8rem",color:"var(--text-d)"}}>{d.getDate()} {months[d.getMonth()]} {d.getFullYear()} · <span className={`badge ${typeBadge[ev.type]||"b-blue"}`}>{ev.type}</span></div>
-                </div>
-                <button className="btn btn-s btn-d" onClick={()=>removeEv(ev.id)}>{Ico.trash} Remover</button>
-              </div>
-              <div className="pgrid">
-                {data.members.map(m=>{ const isOn=present.includes(m.id); return (
-                  <div key={m.id} className={`prow ${isOn?"on":""}`} onClick={()=>togglePresent(ev.id,m.id)}>
-                    <span className="ck">{isOn&&Ico.check}</span><span className="pname">{m.name}</span><span className="pclass">{m.class}</span>
-                  </div>
-                );})}
-              </div>
-              <div className="att-summary">
-                <span className="att-s-item"><span className="att-s-num" style={{color:"var(--green-l)"}}>{presCount}</span>Presentes</span>
-                <span className="att-s-item"><span className="att-s-num" style={{color:"var(--red-l)"}}>{ausCount}</span>Ausentes</span>
-                <span className="att-s-item"><span className="att-s-num" style={{color:"var(--gold)"}}>{data.members.length>0?Math.round(presCount/data.members.length*100):0}%</span>Participação</span>
-              </div>
+
+      {/* EVENTS CARD */}
+      <div className="card">
+        <div className="card-t">
+          <span>Presenças em Eventos</span>
+          <button className="btn" onClick={()=>setShow(!show)}>{Ico.plus} Novo Evento</button>
+        </div>
+        {show&&(
+          <div className="form-box">
+            <div className="fr">
+              <div className="fg"><label>Nome do Evento</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Ex: TW vs Phoenix"/></div>
+              <div className="fg"><label>Tipo</label><select value={form.type} onChange={e=>setForm({...form,type:e.target.value})}>{EVENT_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
+              <div className="fg"><label>Data</label><input type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/></div>
             </div>
-          );
-        })
-      }
+            <button className="btn" onClick={submit}>{Ico.check} Criar Evento</button>
+          </div>
+        )}
+        {data.members.length===0?<div className="empty">Cadastre membros na aba Membros primeiro.</div>
+          :sorted.length===0?<div className="empty">Nenhum evento criado ainda.</div>
+          :sorted.map(ev=>{
+            const d=new Date(ev.date+"T12:00"); const present=ev.present||[]; const presCount=present.length; const ausCount=data.members.length-presCount;
+            const isOpen = expanded[ev.id];
+            return (
+              <div key={ev.id} style={{marginBottom:8,background:"var(--bg-i)",border:"1px solid var(--border)",borderRadius:4,overflow:"hidden"}}>
+                {/* Collapsed header - always visible */}
+                <div
+                  style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",cursor:"pointer",gap:8}}
+                  onClick={()=>toggleExpand(ev.id)}
+                >
+                  <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
+                    <span style={{color:"var(--text-d)",flexShrink:0,transition:"transform .2s",transform:isOpen?"rotate(90deg)":"none"}}>{Ico.chevRight}</span>
+                    <span style={{fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:".9rem",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ev.name}</span>
+                    <span className={`badge ${typeBadge[ev.type]||"b-blue"}`} style={{flexShrink:0}}>{ev.type}</span>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                    <span style={{fontSize:".75rem",color:"var(--text-d)"}}>{d.getDate()} {months[d.getMonth()]}</span>
+                    <span style={{fontSize:".75rem",fontWeight:600,color:presCount>0?"var(--green-l)":"var(--text-d)"}}>{presCount}/{data.members.length}</span>
+                    <button className="btn btn-s btn-d" onClick={e=>{e.stopPropagation();removeEv(ev.id);}}>{Ico.trash}</button>
+                  </div>
+                </div>
+                {/* Expanded content */}
+                {isOpen && (
+                  <div style={{padding:"0 14px 14px"}}>
+                    <div className="pgrid">
+                      {data.members.map(m=>{ const isOn=present.includes(m.id); return (
+                        <div key={m.id} className={`prow ${isOn?"on":""}`} onClick={()=>togglePresent(ev.id,m.id)}>
+                          <span className="ck">{isOn&&Ico.check}</span><span className="pname">{m.name}</span><span className="pclass">{m.class}</span>
+                        </div>
+                      );})}
+                    </div>
+                    <div className="att-summary">
+                      <span className="att-s-item"><span className="att-s-num" style={{color:"var(--green-l)"}}>{presCount}</span>Presentes</span>
+                      <span className="att-s-item"><span className="att-s-num" style={{color:"var(--red-l)"}}>{ausCount}</span>Ausentes</span>
+                      <span className="att-s-item"><span className="att-s-num" style={{color:"var(--gold)"}}>{data.members.length>0?Math.round(presCount/data.members.length*100):0}%</span>Participação</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        }
+      </div>
     </div>
   );
 }
@@ -452,9 +530,11 @@ function EventsTab({ data, save }) {
 /* ═══════════════ TW CONTROL ═══════════════ */
 function TWTab({ data, save }) {
   const [show, setShow] = useState(false);
+  const [expanded, setExpanded] = useState({});
   const [weekLabel, setWeekLabel] = useState("");
   const createWeek = () => { if(!weekLabel.trim()) return; save({...data,twWeeks:[{id:Date.now(),label:weekLabel,confirmed:[],declined:[]},...(data.twWeeks||[])]}); setWeekLabel(""); setShow(false); };
   const removeWeek = (id) => save({...data,twWeeks:(data.twWeeks||[]).filter(w=>w.id!==id)});
+  const toggleExpand = (id) => setExpanded(e=>({...e,[id]:!e[id]}));
   const togglePlayer = (wId,mId,type) => {
     save({...data,twWeeks:(data.twWeeks||[]).map(w=>{
       if(w.id!==wId) return w; const conf=w.confirmed||[]; const decl=w.declined||[];
@@ -477,42 +557,55 @@ function TWTab({ data, save }) {
           const pending=data.members.filter(m=>!conf.includes(m.id)&&!decl.includes(m.id));
           const confM=data.members.filter(m=>conf.includes(m.id));
           const declM=data.members.filter(m=>decl.includes(m.id));
+          const isOpen = expanded[week.id];
           return (
-            <div key={week.id} className="tw-week">
-              <div className="tw-week-h">
-                <span>{week.label}</span>
-                <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+            <div key={week.id} className="tw-week" style={{padding:0,overflow:"hidden"}}>
+              {/* Collapsed header */}
+              <div
+                style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",cursor:"pointer",gap:8}}
+                onClick={()=>toggleExpand(week.id)}
+              >
+                <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
+                  <span style={{color:"var(--text-d)",flexShrink:0,transition:"transform .2s",transform:isOpen?"rotate(90deg)":"none"}}>{Ico.chevRight}</span>
+                  <span style={{fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:".85rem",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{week.label}</span>
+                </div>
+                <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",flexShrink:0}}>
                   <span className="badge b-green">{conf.length} vão</span>
                   <span className="badge b-red">{decl.length} não vão</span>
-                  <span className="badge b-gold">{pending.length} pendentes</span>
-                  <button className="btn btn-s btn-d" onClick={()=>removeWeek(week.id)}>{Ico.trash}</button>
+                  <span className="badge b-gold">{pending.length} pend.</span>
+                  <button className="btn btn-s btn-d" onClick={e=>{e.stopPropagation();removeWeek(week.id);}}>{Ico.trash}</button>
                 </div>
               </div>
-              {pending.length>0&&(
-                <div style={{marginBottom:12}}>
-                  <div style={{fontFamily:"'Cinzel',serif",fontSize:".6rem",letterSpacing:2,textTransform:"uppercase",color:"var(--gold)",marginBottom:6,paddingBottom:4,borderBottom:"1px solid var(--border)"}}>Aguardando ({pending.length})</div>
-                  {pending.map(m=>(
-                    <div key={m.id} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 8px",marginBottom:3,fontSize:".85rem"}}>
-                      <span style={{flex:1,fontWeight:600}}>{m.name}</span>
-                      <span style={{fontSize:".75rem",color:"var(--text-d)",marginRight:8}}>{m.class}</span>
-                      <button className="btn btn-s btn-green" onClick={()=>togglePlayer(week.id,m.id,"confirm")}>✓ Vai</button>
-                      <button className="btn btn-s btn-d" onClick={()=>togglePlayer(week.id,m.id,"decline")}>✗ Não vai</button>
+              {/* Expanded content */}
+              {isOpen && (
+                <div style={{padding:"0 16px 16px"}}>
+                  {pending.length>0&&(
+                    <div style={{marginBottom:12}}>
+                      <div style={{fontFamily:"'Cinzel',serif",fontSize:".6rem",letterSpacing:2,textTransform:"uppercase",color:"var(--gold)",marginBottom:6,paddingBottom:4,borderBottom:"1px solid var(--border)"}}>Aguardando ({pending.length})</div>
+                      {pending.map(m=>(
+                        <div key={m.id} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 8px",marginBottom:3,fontSize:".85rem"}}>
+                          <span style={{flex:1,fontWeight:600}}>{m.name}</span>
+                          <span style={{fontSize:".75rem",color:"var(--text-d)",marginRight:8}}>{m.class}</span>
+                          <button className="btn btn-s btn-green" onClick={()=>togglePlayer(week.id,m.id,"confirm")}>✓ Vai</button>
+                          <button className="btn btn-s btn-d" onClick={()=>togglePlayer(week.id,m.id,"decline")}>✗ Não vai</button>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
+                  <div className="tw-cols">
+                    <div>
+                      <div className="tw-col-h go">Confirmados ({confM.length})</div>
+                      {confM.length===0?<div style={{fontSize:".8rem",color:"var(--text-d)",fontStyle:"italic",padding:"4px 8px"}}>Ninguém confirmado</div>
+                        :confM.map(m=>(<div key={m.id} className="tw-player go" onClick={()=>togglePlayer(week.id,m.id,"confirm")}><span style={{color:"var(--green-l)",marginRight:4}}>●</span><span style={{fontWeight:600,flex:1}}>{m.name}</span><span style={{fontSize:".75rem",color:"var(--text-d)"}}>{m.class}</span></div>))}
+                    </div>
+                    <div>
+                      <div className="tw-col-h no">Não Participam ({declM.length})</div>
+                      {declM.length===0?<div style={{fontSize:".8rem",color:"var(--text-d)",fontStyle:"italic",padding:"4px 8px"}}>—</div>
+                        :declM.map(m=>(<div key={m.id} className="tw-player no" onClick={()=>togglePlayer(week.id,m.id,"decline")}><span style={{color:"var(--red-l)",marginRight:4}}>●</span><span style={{flex:1}}>{m.name}</span><span style={{fontSize:".75rem"}}>{m.class}</span></div>))}
+                    </div>
+                  </div>
                 </div>
               )}
-              <div className="tw-cols">
-                <div>
-                  <div className="tw-col-h go">Confirmados ({confM.length})</div>
-                  {confM.length===0?<div style={{fontSize:".8rem",color:"var(--text-d)",fontStyle:"italic",padding:"4px 8px"}}>Ninguém confirmado</div>
-                    :confM.map(m=>(<div key={m.id} className="tw-player go" onClick={()=>togglePlayer(week.id,m.id,"confirm")}><span style={{color:"var(--green-l)",marginRight:4}}>●</span><span style={{fontWeight:600,flex:1}}>{m.name}</span><span style={{fontSize:".75rem",color:"var(--text-d)"}}>{m.class}</span></div>))}
-                </div>
-                <div>
-                  <div className="tw-col-h no">Não Participam ({declM.length})</div>
-                  {declM.length===0?<div style={{fontSize:".8rem",color:"var(--text-d)",fontStyle:"italic",padding:"4px 8px"}}>—</div>
-                    :declM.map(m=>(<div key={m.id} className="tw-player no" onClick={()=>togglePlayer(week.id,m.id,"decline")}><span style={{color:"var(--red-l)",marginRight:4}}>●</span><span style={{flex:1}}>{m.name}</span><span style={{fontSize:".75rem"}}>{m.class}</span></div>))}
-                </div>
-              </div>
             </div>
           );
         })
