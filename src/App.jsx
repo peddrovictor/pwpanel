@@ -133,6 +133,7 @@ export default function App() {
     { id:"members", label:"Membros", icon:Ico.users },
     { id:"events", label:"Presenças", icon:Ico.cal },
     { id:"tw", label:"Controle TW", icon:Ico.shield },
+    { id:"pts", label:"Montar PTs", icon:Ico.swords },
     { id:"accounts", label:"Contas", icon:Ico.key },
     ...(auth.isAdmin ? [{ id:"staff", label:"Staff", icon:Ico.edit }] : []),
   ];
@@ -160,6 +161,7 @@ export default function App() {
       {tab==="members" && <MembersTab data={data} save={save}/>}
       {tab==="events" && <EventsTab data={data} save={save}/>}
       {tab==="tw" && <TWTab data={data} save={save}/>}
+      {tab==="pts" && <PTBuilderTab data={data} save={save}/>}
       {tab==="accounts" && <AccountsTab data={data} save={save}/>}
       {tab==="staff" && auth.isAdmin && <StaffTab/>}
     </div>
@@ -515,6 +517,316 @@ function TWTab({ data, save }) {
           );
         })
       }
+    </div>
+  );
+}
+
+/* ═══════════════ PT BUILDER ═══════════════ */
+function PTBuilderTab({ data, save }) {
+  const [selectedWeek, setSelectedWeek] = useState(null);
+  const [dragPlayer, setDragPlayer] = useState(null);
+
+  const weeks = data.twWeeks || [];
+  const pts = data.twPTs || {};
+
+  // Get current week's PTs or empty
+  const weekPTs = selectedWeek ? (pts[selectedWeek] || []) : [];
+
+  // Get confirmed players for selected week
+  const getConfirmed = () => {
+    if (!selectedWeek) return [];
+    const week = weeks.find(w => w.id === selectedWeek);
+    if (!week) return [];
+    return (week.confirmed || [])
+      .map(id => data.members.find(m => m.id === id))
+      .filter(Boolean);
+  };
+
+  // Get players NOT assigned to any PT yet
+  const getUnassigned = () => {
+    const confirmed = getConfirmed();
+    const assigned = new Set(weekPTs.flatMap(pt => pt.players || []));
+    return confirmed.filter(m => !assigned.has(m.id));
+  };
+
+  const savePTs = (newPTs) => {
+    const updated = { ...pts, [selectedWeek]: newPTs };
+    save({ ...data, twPTs: updated });
+  };
+
+  const createPT = () => {
+    const num = weekPTs.length + 1;
+    savePTs([...weekPTs, { id: Date.now(), name: "PT " + num, players: [] }]);
+  };
+
+  const removePT = (ptId) => {
+    savePTs(weekPTs.filter(pt => pt.id !== ptId));
+  };
+
+  const renamePT = (ptId, name) => {
+    savePTs(weekPTs.map(pt => pt.id === ptId ? { ...pt, name } : pt));
+  };
+
+  const addPlayerToPT = (ptId, memberId) => {
+    savePTs(weekPTs.map(pt => {
+      if (pt.id !== ptId) return pt;
+      if ((pt.players || []).length >= 10) return pt;
+      if ((pt.players || []).includes(memberId)) return pt;
+      return { ...pt, players: [...(pt.players || []), memberId] };
+    }));
+  };
+
+  const removePlayerFromPT = (ptId, memberId) => {
+    savePTs(weekPTs.map(pt => {
+      if (pt.id !== ptId) return pt;
+      return { ...pt, players: (pt.players || []).filter(id => id !== memberId) };
+    }));
+  };
+
+  const movePlayer = (fromPtId, toPtId, memberId) => {
+    savePTs(weekPTs.map(pt => {
+      if (pt.id === fromPtId) return { ...pt, players: (pt.players || []).filter(id => id !== memberId) };
+      if (pt.id === toPtId) {
+        if ((pt.players || []).length >= 10) return pt;
+        return { ...pt, players: [...(pt.players || []), memberId] };
+      }
+      return pt;
+    }));
+  };
+
+  const confirmed = getConfirmed();
+  const unassigned = getUnassigned();
+
+  // Class composition for a PT
+  const getClassCount = (players) => {
+    const counts = {};
+    players.forEach(id => {
+      const m = data.members.find(x => x.id === id);
+      if (m) counts[m.class] = (counts[m.class] || 0) + 1;
+    });
+    return counts;
+  };
+
+  return (
+    <div className="card">
+      <div className="card-t">
+        <span>Montar PTs — TW</span>
+      </div>
+
+      {/* Week selector */}
+      {weeks.length === 0 ? (
+        <div className="empty">Crie uma semana de TW na aba "Controle TW" primeiro.</div>
+      ) : (
+        <>
+          <div style={{marginBottom:16}}>
+            <label style={{fontFamily:"'Cinzel',serif",fontSize:".55rem",letterSpacing:2,textTransform:"uppercase",color:"var(--text-d)",display:"block",marginBottom:4}}>Selecionar Semana de TW</label>
+            <select
+              value={selectedWeek || ""}
+              onChange={e => setSelectedWeek(e.target.value ? Number(e.target.value) : null)}
+              style={{width:"100%",maxWidth:400}}
+            >
+              <option value="">— Selecione uma semana —</option>
+              {weeks.map(w => (
+                <option key={w.id} value={w.id}>
+                  {w.label} ({(w.confirmed || []).length} confirmados)
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {selectedWeek && confirmed.length === 0 && (
+            <div className="empty">Nenhum player confirmado nessa semana. Confirme jogadores na aba "Controle TW".</div>
+          )}
+
+          {selectedWeek && confirmed.length > 0 && (
+            <>
+              {/* Stats bar */}
+              <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:16,padding:"10px 14px",background:"var(--bg)",borderRadius:4}}>
+                <span className="att-s-item"><span className="att-s-num" style={{color:"var(--gold)"}}>{confirmed.length}</span>Confirmados</span>
+                <span className="att-s-item"><span className="att-s-num" style={{color:"var(--green-l)"}}>{confirmed.length - unassigned.length}</span>Alocados</span>
+                <span className="att-s-item"><span className="att-s-num" style={{color:unassigned.length > 0 ? "var(--red-l)" : "var(--green-l)"}}>{unassigned.length}</span>Sem PT</span>
+                <span className="att-s-item"><span className="att-s-num" style={{color:"var(--gold)"}}>{weekPTs.length}</span>PTs</span>
+              </div>
+
+              {/* Unassigned pool */}
+              <div style={{marginBottom:16,background:"var(--bg-i)",border:"1px solid var(--border)",borderRadius:4,padding:14}}>
+                <div style={{fontFamily:"'Cinzel',serif",fontSize:".65rem",letterSpacing:2,textTransform:"uppercase",color:"var(--gold)",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span>Jogadores Disponíveis ({unassigned.length})</span>
+                  <button className="btn" onClick={createPT}>{Ico.plus} Nova PT</button>
+                </div>
+                {unassigned.length === 0 ? (
+                  <div style={{fontSize:".8rem",color:"var(--text-d)",fontStyle:"italic",padding:8}}>Todos os jogadores já estão alocados em PTs.</div>
+                ) : (
+                  <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                    {unassigned.map(m => (
+                      <div
+                        key={m.id}
+                        draggable
+                        onDragStart={() => setDragPlayer({ id: m.id, fromPt: null })}
+                        onDragEnd={() => setDragPlayer(null)}
+                        style={{
+                          display:"flex",alignItems:"center",gap:6,padding:"6px 10px",
+                          background:"var(--bg)",border:"1px solid var(--border)",borderRadius:3,
+                          cursor:"grab",fontSize:".85rem",transition:"all .2s",userSelect:"none"
+                        }}
+                        onMouseOver={e=>e.currentTarget.style.borderColor="var(--gold-d)"}
+                        onMouseOut={e=>e.currentTarget.style.borderColor="var(--border)"}
+                      >
+                        <span style={{width:8,height:8,borderRadius:1,background:CLASS_COLORS[m.class],display:"inline-block"}}/>
+                        <span style={{fontWeight:600}}>{m.name}</span>
+                        <span style={{fontSize:".65rem",color:CLASS_COLORS[m.class],fontFamily:"'Cinzel',serif",letterSpacing:1}}>{m.class}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* PT Cards */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(300px, 1fr))",gap:12}}>
+                {weekPTs.map(pt => {
+                  const ptPlayers = (pt.players || []).map(id => data.members.find(m => m.id === id)).filter(Boolean);
+                  const classCount = getClassCount(pt.players || []);
+                  const isFull = ptPlayers.length >= 10;
+
+                  return (
+                    <div
+                      key={pt.id}
+                      onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = isFull ? "var(--red)" : "var(--gold)"; }}
+                      onDragLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; }}
+                      onDrop={e => {
+                        e.preventDefault();
+                        e.currentTarget.style.borderColor = "var(--border)";
+                        if (dragPlayer && !isFull) {
+                          if (dragPlayer.fromPt) movePlayer(dragPlayer.fromPt, pt.id, dragPlayer.id);
+                          else addPlayerToPT(pt.id, dragPlayer.id);
+                          setDragPlayer(null);
+                        }
+                      }}
+                      style={{
+                        background:"var(--bg-i)",border:"1px solid var(--border)",borderRadius:4,
+                        padding:14,transition:"border-color .2s",position:"relative"
+                      }}
+                    >
+                      {/* PT Header */}
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,gap:6}}>
+                        <input
+                          value={pt.name}
+                          onChange={e => renamePT(pt.id, e.target.value)}
+                          style={{
+                            background:"transparent",border:"none",borderBottom:"1px solid var(--border-g)",
+                            color:"var(--gold)",fontFamily:"'Cinzel',serif",fontSize:".8rem",fontWeight:700,
+                            letterSpacing:2,padding:"2px 4px",flex:1,outline:"none",textTransform:"uppercase"
+                          }}
+                        />
+                        <span style={{
+                          fontFamily:"'Cinzel',serif",fontSize:".65rem",letterSpacing:1,
+                          color: isFull ? "var(--green-l)" : "var(--text-d)"
+                        }}>
+                          {ptPlayers.length}/10
+                        </span>
+                        <button className="btn btn-s btn-d" onClick={() => removePT(pt.id)}>{Ico.trash}</button>
+                      </div>
+
+                      {/* Capacity bar */}
+                      <div style={{width:"100%",height:3,background:"var(--border)",borderRadius:2,marginBottom:10,overflow:"hidden"}}>
+                        <div style={{
+                          width: (ptPlayers.length / 10 * 100) + "%",
+                          height:"100%",
+                          background: isFull ? "var(--green-l)" : "var(--gold)",
+                          borderRadius:2,transition:"width .3s"
+                        }}/>
+                      </div>
+
+                      {/* Class composition mini badges */}
+                      {Object.keys(classCount).length > 0 && (
+                        <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
+                          {Object.entries(classCount).map(([cls, cnt]) => (
+                            <span key={cls} style={{
+                              fontSize:".55rem",padding:"1px 6px",borderRadius:2,
+                              background:CLASS_COLORS[cls]+"18",color:CLASS_COLORS[cls],
+                              border:`1px solid ${CLASS_COLORS[cls]}40`,
+                              fontFamily:"'Cinzel',serif",letterSpacing:1,fontWeight:600
+                            }}>
+                              {cnt}x {cls}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Players list */}
+                      {ptPlayers.length === 0 ? (
+                        <div style={{
+                          padding:20,textAlign:"center",fontSize:".8rem",color:"var(--text-d)",
+                          fontStyle:"italic",border:"1px dashed var(--border-g)",borderRadius:3
+                        }}>
+                          Arraste jogadores aqui
+                        </div>
+                      ) : (
+                        <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                          {ptPlayers.map((m, idx) => (
+                            <div
+                              key={m.id}
+                              draggable
+                              onDragStart={() => setDragPlayer({ id: m.id, fromPt: pt.id })}
+                              onDragEnd={() => setDragPlayer(null)}
+                              style={{
+                                display:"flex",alignItems:"center",gap:6,padding:"5px 8px",
+                                background:"var(--bg)",borderRadius:3,fontSize:".85rem",
+                                cursor:"grab",transition:"all .15s",userSelect:"none"
+                              }}
+                              onMouseOver={e=>e.currentTarget.style.background="var(--bg-h)"}
+                              onMouseOut={e=>e.currentTarget.style.background="var(--bg)"}
+                            >
+                              <span style={{
+                                width:16,height:16,borderRadius:2,display:"flex",alignItems:"center",justifyContent:"center",
+                                background:"var(--border)",fontSize:".6rem",color:"var(--text-d)",fontFamily:"'Cinzel',serif",flexShrink:0
+                              }}>
+                                {idx + 1}
+                              </span>
+                              <span style={{width:8,height:8,borderRadius:1,background:CLASS_COLORS[m.class],display:"inline-block",flexShrink:0}}/>
+                              <span style={{fontWeight:600,flex:1}}>{m.name}</span>
+                              <span style={{fontSize:".65rem",color:CLASS_COLORS[m.class],fontFamily:"'Cinzel',serif",letterSpacing:1}}>{m.class}</span>
+                              <button
+                                onClick={() => removePlayerFromPT(pt.id, m.id)}
+                                style={{background:"none",border:"none",color:"var(--red-l)",cursor:"pointer",padding:2,opacity:.5,fontSize:".7rem"}}
+                                onMouseOver={e=>e.currentTarget.style.opacity="1"}
+                                onMouseOut={e=>e.currentTarget.style.opacity=".5"}
+                              >✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Quick add: click to add from unassigned */}
+                      {!isFull && unassigned.length > 0 && (
+                        <div style={{marginTop:8}}>
+                          <select
+                            value=""
+                            onChange={e => { if (e.target.value) addPlayerToPT(pt.id, Number(e.target.value)); }}
+                            style={{width:"100%",fontSize:".8rem",padding:"4px 8px"}}
+                          >
+                            <option value="">+ Adicionar jogador...</option>
+                            {unassigned.map(m => (
+                              <option key={m.id} value={m.id}>[{m.class}] {m.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Add PT button when no PTs yet */}
+              {weekPTs.length === 0 && (
+                <div style={{textAlign:"center",padding:20}}>
+                  <button className="btn" onClick={createPT}>{Ico.plus} Criar Primeira PT</button>
+                </div>
+              )}
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 }
