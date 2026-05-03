@@ -35,6 +35,7 @@ export const DEFAULT_DATA = {
   events: [],
   twWeeks: [],
   lentAccounts: [],
+  twPTs: {},
 };
 
 export function resolveClass(raw) {
