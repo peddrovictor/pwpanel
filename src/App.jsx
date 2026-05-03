@@ -66,7 +66,7 @@ function sanitize(d) {
 }
 
 // Safe class color (fallback for unknown classes)
-function cc(cls) { return cc(cls) || "#7A7060"; }
+function cc(cls) { return CLASS_COLORS[cls] || "#7A7060"; }
 
 
 /* ═══════════════ LOGIN ═══════════════ */
