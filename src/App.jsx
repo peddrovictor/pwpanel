@@ -11,6 +11,22 @@ import {
 const AUTH_KEY = "staff_auth";
 const DATA_KEY = "clan_data";
 
+// Ensure all fields exist (Firebase strips empty arrays)
+function sanitize(d) {
+  if (!d || typeof d !== "object") return { ...DEFAULT_DATA };
+  return {
+    members: Array.isArray(d.members) ? d.members : [],
+    events: Array.isArray(d.events) ? d.events : [],
+    twWeeks: Array.isArray(d.twWeeks) ? d.twWeeks : [],
+    lentAccounts: Array.isArray(d.lentAccounts) ? d.lentAccounts : [],
+    twPTs: d.twPTs && typeof d.twPTs === "object" ? d.twPTs : {},
+  };
+}
+
+// Safe class color (fallback for unknown classes)
+function cc(cls) { return cc(cls) || "#7A7060"; }
+
+
 /* ═══════════════ LOGIN ═══════════════ */
 function LoginScreen({ onLogin }) {
   const [mode, setMode] = useState("loading");
@@ -97,7 +113,7 @@ export default function App() {
 
     // Real-time sync: listen for changes
     const unsubscribe = storage.subscribe(DATA_KEY, (val) => {
-      setData(val || DEFAULT_DATA);
+      setData(sanitize(val));
       setLoading(false);
       clearTimeout(timeout);
     });
@@ -106,9 +122,9 @@ export default function App() {
     (async () => {
       try {
         const s = await storage.get(DATA_KEY);
-        if (s?.value) setData(JSON.parse(s.value));
-        else setData(DEFAULT_DATA);
-      } catch { setData(DEFAULT_DATA); }
+        if (s?.value) setData(sanitize(JSON.parse(s.value)));
+        else setData({ ...DEFAULT_DATA });
+      } catch { setData({ ...DEFAULT_DATA }); }
       setLoading(false);
       clearTimeout(timeout);
     })();
@@ -266,7 +282,7 @@ function MembersTab({ data, save }) {
                     return (
                       <tr key={i} style={isDupe?{opacity:.4}:{}}>
                         <td style={{fontWeight:600}}>{m.name}{isDupe&&<span style={{fontSize:".7rem",color:"var(--red-l)",marginLeft:6}}>(já existe)</span>}</td>
-                        <td><span className="badge" style={{background:CLASS_COLORS[m.class]+"22",color:CLASS_COLORS[m.class],border:`1px solid ${CLASS_COLORS[m.class]}55`}}>{m.class}</span></td>
+                        <td><span className="badge" style={{background:cc(m.class)+"22",color:cc(m.class),border:`1px solid ${cc(m.class)}55`}}>{m.class}</span></td>
                         <td>{m.level}</td>
                       </tr>
                     );
@@ -309,7 +325,7 @@ function MembersTab({ data, save }) {
               {data.members.map(m=>(
                 <tr key={m.id}>
                   <td style={{fontWeight:600}}>{m.name}</td>
-                  <td><span className="badge" style={{background:CLASS_COLORS[m.class]+"22",color:CLASS_COLORS[m.class],border:`1px solid ${CLASS_COLORS[m.class]}55`}}>{m.class}</span></td>
+                  <td><span className="badge" style={{background:cc(m.class)+"22",color:cc(m.class),border:`1px solid ${cc(m.class)}55`}}>{m.class}</span></td>
                   <td>{m.level}</td>
                   <td><span className="badge b-gold">{m.cultivo}</span></td>
                   <td style={{fontSize:".85rem",color:"var(--text-d)"}}>{m.whatsapp||"—"}</td>
@@ -331,7 +347,7 @@ function MembersTab({ data, save }) {
 /* ═══════════════ CLASS CHART ═══════════════ */
 function ClassChart({ members }) {
   const counts = CLASSES.reduce((a,c)=>{ a[c]=members.filter(m=>m.class===c).length; return a; },{});
-  const chartData = CLASSES.map(c=>({ name:c, full:CLASS_LABELS[c], count:counts[c], fill:CLASS_COLORS[c] }));
+  const chartData = CLASSES.map(c=>({ name:c, full:CLASS_LABELS[c], count:counts[c], fill:cc(c) }));
   const total = members.length;
   const ideal = total>0?Math.round(total/CLASSES.length):0;
   const emptyClasses = CLASSES.filter(c=>counts[c]===0);
@@ -370,7 +386,7 @@ function ClassChart({ members }) {
       <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:10,justifyContent:"center"}}>
         {CLASSES.map(c=>(
           <div key={c} style={{display:"flex",alignItems:"center",gap:4,fontSize:".7rem",color:counts[c]===0?"var(--text-d)":"var(--text)"}}>
-            <span style={{width:8,height:8,borderRadius:1,background:CLASS_COLORS[c],opacity:counts[c]===0?.3:1,display:"inline-block"}}/>
+            <span style={{width:8,height:8,borderRadius:1,background:cc(c),opacity:counts[c]===0?.3:1,display:"inline-block"}}/>
             <span style={{fontFamily:"'Cinzel',serif",letterSpacing:1,fontWeight:600}}>{c}</span>
             <span style={{color:"var(--text-d)"}}>({counts[c]})</span>
           </div>
@@ -378,8 +394,8 @@ function ClassChart({ members }) {
       </div>
       {(emptyClasses.length>0||heavyClasses.length>0)&&(
         <div style={{marginTop:10,padding:"8px 12px",background:"var(--bg)",borderRadius:3,fontSize:".8rem",color:"var(--text-d)",lineHeight:1.6}}>
-          {emptyClasses.length>0&&<div><span style={{color:"var(--red-l)"}}>⚠ Sem membros:</span> {emptyClasses.map((c,i)=><span key={c}><span style={{color:CLASS_COLORS[c],fontWeight:600}}>{c}</span>{i<emptyClasses.length-1?", ":""}</span>)}</div>}
-          {heavyClasses.length>0&&<div><span style={{color:"var(--gold)"}}>⚖ Excesso:</span> {heavyClasses.map((c,i)=><span key={c}><span style={{color:CLASS_COLORS[c],fontWeight:600}}>{c}</span> ({counts[c]}){i<heavyClasses.length-1?", ":""}</span>)}</div>}
+          {emptyClasses.length>0&&<div><span style={{color:"var(--red-l)"}}>⚠ Sem membros:</span> {emptyClasses.map((c,i)=><span key={c}><span style={{color:cc(c),fontWeight:600}}>{c}</span>{i<emptyClasses.length-1?", ":""}</span>)}</div>}
+          {heavyClasses.length>0&&<div><span style={{color:"var(--gold)"}}>⚖ Excesso:</span> {heavyClasses.map((c,i)=><span key={c}><span style={{color:cc(c),fontWeight:600}}>{c}</span> ({counts[c]}){i<heavyClasses.length-1?", ":""}</span>)}</div>}
         </div>
       )}
     </div>
@@ -440,7 +456,7 @@ function EventsTab({ data, save }) {
                         {i<3 ? ["🥇","🥈","🥉"][i] : i+1}
                       </td>
                       <td style={{fontWeight:600}}>{m.name}</td>
-                      <td><span className="badge" style={{background:CLASS_COLORS[m.class]+"22",color:CLASS_COLORS[m.class],border:`1px solid ${CLASS_COLORS[m.class]}55`}}>{m.class}</span></td>
+                      <td><span className="badge" style={{background:cc(m.class)+"22",color:cc(m.class),border:`1px solid ${cc(m.class)}55`}}>{m.class}</span></td>
                       <td style={{fontSize:".8rem"}}>{twT>0?<span style={{color:twC>0?"var(--text)":"var(--text-d)"}}>{twC}/{twT}</span>:"—"}</td>
                       <td style={{fontSize:".8rem"}}>{wbT>0?<span style={{color:wbC>0?"var(--text)":"var(--text-d)"}}>{wbC}/{wbT}</span>:"—"}</td>
                       <td style={{fontSize:".8rem"}}>{mcT>0?<span style={{color:mcC>0?"var(--text)":"var(--text-d)"}}>{mcC}/{mcT}</span>:"—"}</td>
@@ -765,9 +781,9 @@ function PTBuilderTab({ data, save }) {
                         onMouseOver={e=>e.currentTarget.style.borderColor="var(--gold-d)"}
                         onMouseOut={e=>e.currentTarget.style.borderColor="var(--border)"}
                       >
-                        <span style={{width:8,height:8,borderRadius:1,background:CLASS_COLORS[m.class],display:"inline-block"}}/>
+                        <span style={{width:8,height:8,borderRadius:1,background:cc(m.class),display:"inline-block"}}/>
                         <span style={{fontWeight:600}}>{m.name}</span>
-                        <span style={{fontSize:".65rem",color:CLASS_COLORS[m.class],fontFamily:"'Cinzel',serif",letterSpacing:1}}>{m.class}</span>
+                        <span style={{fontSize:".65rem",color:cc(m.class),fontFamily:"'Cinzel',serif",letterSpacing:1}}>{m.class}</span>
                       </div>
                     ))}
                   </div>
@@ -836,8 +852,8 @@ function PTBuilderTab({ data, save }) {
                           {Object.entries(classCount).map(([cls, cnt]) => (
                             <span key={cls} style={{
                               fontSize:".55rem",padding:"1px 6px",borderRadius:2,
-                              background:CLASS_COLORS[cls]+"18",color:CLASS_COLORS[cls],
-                              border:`1px solid ${CLASS_COLORS[cls]}40`,
+                              background:cc(cls)+"18",color:cc(cls),
+                              border:`1px solid ${cc(cls)}40`,
                               fontFamily:"'Cinzel',serif",letterSpacing:1,fontWeight:600
                             }}>
                               {cnt}x {cls}
@@ -876,9 +892,9 @@ function PTBuilderTab({ data, save }) {
                               }}>
                                 {idx + 1}
                               </span>
-                              <span style={{width:8,height:8,borderRadius:1,background:CLASS_COLORS[m.class],display:"inline-block",flexShrink:0}}/>
+                              <span style={{width:8,height:8,borderRadius:1,background:cc(m.class),display:"inline-block",flexShrink:0}}/>
                               <span style={{fontWeight:600,flex:1}}>{m.name}</span>
-                              <span style={{fontSize:".65rem",color:CLASS_COLORS[m.class],fontFamily:"'Cinzel',serif",letterSpacing:1}}>{m.class}</span>
+                              <span style={{fontSize:".65rem",color:cc(m.class),fontFamily:"'Cinzel',serif",letterSpacing:1}}>{m.class}</span>
                               <button
                                 onClick={() => removePlayerFromPT(pt.id, m.id)}
                                 style={{background:"none",border:"none",color:"var(--red-l)",cursor:"pointer",padding:2,opacity:.5,fontSize:".7rem"}}
@@ -969,7 +985,7 @@ function AccountsTab({ data, save }) {
             {(data.lentAccounts||[]).map(a=>(
               <tr key={a.id}>
                 <td style={{fontWeight:600}}>{a.charName}</td>
-                <td><span className="badge" style={{background:CLASS_COLORS[a.class]+"22",color:CLASS_COLORS[a.class],border:`1px solid ${CLASS_COLORS[a.class]}55`}}>{a.class}</span></td>
+                <td><span className="badge" style={{background:cc(a.class)+"22",color:cc(a.class),border:`1px solid ${cc(a.class)}55`}}>{a.class}</span></td>
                 <td>{a.borrower}</td>
                 <td style={{fontSize:".85rem",fontFamily:"monospace",color:"var(--text-d)"}}>{a.login||"—"}</td>
                 <td>{a.senha?(<div className="pw-wrap">{reveals[a.id]?<span style={{fontFamily:"monospace",fontSize:".85rem"}}>{a.senha}</span>:<span className="pw-mask">••••••</span>}<button className="pw-toggle" onClick={()=>toggleReveal(a.id)}>{reveals[a.id]?Ico.eyeOff:Ico.eye}</button></div>):"—"}</td>
