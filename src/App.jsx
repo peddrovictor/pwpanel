@@ -444,6 +444,148 @@ function ClassChart({ members }) {
   );
 }
 
+/* ═══════════════ ATTENDANCE PANEL ═══════════════ */
+function AttendancePanel({ members, present, onToggle, onBulkToggle }) {
+  const [search, setSearch] = useState("");
+  const [classFilter, setClassFilter] = useState(null);
+  const [showMode, setShowMode] = useState("all"); // all, present, absent
+
+  const presSet = new Set(present);
+  const presCount = members.filter(m => presSet.has(m.id)).length;
+  const ausCount = members.length - presCount;
+
+  // Filter members
+  const filtered = members.filter(m => {
+    if (search && !m.name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (classFilter && m.class !== classFilter) return false;
+    if (showMode === "present" && !presSet.has(m.id)) return false;
+    if (showMode === "absent" && presSet.has(m.id)) return false;
+    return true;
+  });
+
+  // Sort: present first, then alphabetical
+  const sorted = [...filtered].sort((a, b) => {
+    const aP = presSet.has(a.id) ? 0 : 1;
+    const bP = presSet.has(b.id) ? 0 : 1;
+    if (aP !== bP) return aP - bP;
+    return a.name.localeCompare(b.name);
+  });
+
+  const filteredIds = filtered.map(m => m.id);
+  const filteredAbsentIds = filtered.filter(m => !presSet.has(m.id)).map(m => m.id);
+  const filteredPresentIds = filtered.filter(m => presSet.has(m.id)).map(m => m.id);
+
+  // Class counts for filter buttons
+  const classCounts = CLASSES.reduce((a, c) => { a[c] = members.filter(m => m.class === c).length; return a; }, {});
+
+  return (
+    <div style={{padding:"0 14px 14px"}}>
+      {/* Search + filters bar */}
+      <div style={{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
+        <div style={{position:"relative",flex:1,minWidth:180}}>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar por nome..."
+            style={{width:"100%",paddingLeft:10,fontSize:".85rem"}}
+          />
+        </div>
+        {/* Quick actions */}
+        <button className="btn btn-s btn-green" onClick={() => onBulkToggle(filteredAbsentIds, true)} disabled={filteredAbsentIds.length === 0}>
+          ✓ Marcar filtrados ({filteredAbsentIds.length})
+        </button>
+        <button className="btn btn-s btn-d" onClick={() => onBulkToggle(filteredPresentIds, false)} disabled={filteredPresentIds.length === 0}>
+          ✗ Desmarcar filtrados
+        </button>
+      </div>
+
+      {/* Class filter chips */}
+      <div style={{display:"flex",gap:4,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
+        <button
+          onClick={() => setClassFilter(null)}
+          className="btn btn-s"
+          style={!classFilter ? {background:"rgba(201,168,76,.2)",borderColor:"var(--gold)"} : {}}
+        >Todas</button>
+        {CLASSES.filter(c => classCounts[c] > 0).map(c => (
+          <button
+            key={c}
+            onClick={() => setClassFilter(classFilter === c ? null : c)}
+            className="btn btn-s"
+            style={classFilter === c
+              ? {background:cc(c)+"30",borderColor:cc(c),color:cc(c)}
+              : {color:"var(--text-d)"}}
+          >
+            {c} ({classCounts[c]})
+          </button>
+        ))}
+      </div>
+
+      {/* View mode tabs */}
+      <div style={{display:"flex",gap:4,marginBottom:10}}>
+        {[
+          {id:"all",label:`Todos (${members.length})`},
+          {id:"present",label:`Presentes (${presCount})`},
+          {id:"absent",label:`Ausentes (${ausCount})`},
+        ].map(v => (
+          <button
+            key={v.id}
+            onClick={() => setShowMode(v.id)}
+            className="btn btn-s"
+            style={showMode === v.id
+              ? {background:"rgba(201,168,76,.15)",borderColor:"var(--gold-d)",color:"var(--gold)"}
+              : {color:"var(--text-d)"}}
+          >
+            {v.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Members grid - compact */}
+      {sorted.length === 0 ? (
+        <div style={{padding:16,textAlign:"center",color:"var(--text-d)",fontStyle:"italic",fontSize:".85rem"}}>
+          Nenhum membro encontrado.
+        </div>
+      ) : (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))",gap:4}}>
+          {sorted.map(m => {
+            const isOn = presSet.has(m.id);
+            return (
+              <div
+                key={m.id}
+                onClick={() => onToggle(m.id)}
+                style={{
+                  display:"flex",alignItems:"center",gap:6,padding:"6px 8px",
+                  background: isOn ? "rgba(56,121,74,.1)" : "var(--bg)",
+                  border: `1px solid ${isOn ? "rgba(56,121,74,.3)" : "var(--border)"}`,
+                  borderRadius:3,cursor:"pointer",transition:"all .15s",fontSize:".82rem"
+                }}
+              >
+                <span style={{
+                  width:16,height:16,borderRadius:2,display:"flex",alignItems:"center",justifyContent:"center",
+                  background: isOn ? "var(--green)" : "var(--bg-i)",
+                  border: `1.5px solid ${isOn ? "var(--green-l)" : "var(--border-g)"}`,
+                  flexShrink:0,transition:"all .15s"
+                }}>
+                  {isOn && Ico.check}
+                </span>
+                <span style={{fontWeight:600,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.name}</span>
+                <span style={{fontSize:".6rem",color:cc(m.class),fontFamily:"'Cinzel',serif",letterSpacing:1,flexShrink:0}}>{m.class}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Summary */}
+      <div className="att-summary" style={{marginTop:10}}>
+        <span className="att-s-item"><span className="att-s-num" style={{color:"var(--green-l)"}}>{presCount}</span>Presentes</span>
+        <span className="att-s-item"><span className="att-s-num" style={{color:"var(--red-l)"}}>{ausCount}</span>Ausentes</span>
+        <span className="att-s-item"><span className="att-s-num" style={{color:"var(--gold)"}}>{members.length > 0 ? Math.round(presCount/members.length*100) : 0}%</span>Participação</span>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════ EVENTS ═══════════════ */
 function EventsTab({ data, save }) {
   const [show, setShow] = useState(false);
@@ -561,20 +703,18 @@ function EventsTab({ data, save }) {
                 </div>
                 {/* Expanded content */}
                 {isOpen && (
-                  <div style={{padding:"0 14px 14px"}}>
-                    <div className="pgrid">
-                      {data.members.map(m=>{ const isOn=present.includes(m.id); return (
-                        <div key={m.id} className={`prow ${isOn?"on":""}`} onClick={()=>togglePresent(ev.id,m.id)}>
-                          <span className="ck">{isOn&&Ico.check}</span><span className="pname">{m.name}</span><span className="pclass">{m.class}</span>
-                        </div>
-                      );})}
-                    </div>
-                    <div className="att-summary">
-                      <span className="att-s-item"><span className="att-s-num" style={{color:"var(--green-l)"}}>{presCount}</span>Presentes</span>
-                      <span className="att-s-item"><span className="att-s-num" style={{color:"var(--red-l)"}}>{ausCount}</span>Ausentes</span>
-                      <span className="att-s-item"><span className="att-s-num" style={{color:"var(--gold)"}}>{data.members.length>0?Math.round(presCount/data.members.length*100):0}%</span>Participação</span>
-                    </div>
-                  </div>
+                  <AttendancePanel
+                    members={data.members}
+                    present={present}
+                    onToggle={(mId) => togglePresent(ev.id, mId)}
+                    onBulkToggle={(ids, add) => {
+                      const p = ev.present || [];
+                      const newPresent = add
+                        ? [...new Set([...p, ...ids])]
+                        : p.filter(id => !ids.includes(id));
+                      save({...data, events: data.events.map(e => e.id === ev.id ? {...e, present: newPresent} : e)});
+                    }}
+                  />
                 )}
               </div>
             );
