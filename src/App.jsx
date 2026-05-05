@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Cell, ResponsiveContainer } from "recharts";
-import Tesseract from "tesseract.js";
 import { storage } from "./firebase";
 import { Ico } from "./Icons";
 import {
@@ -33,6 +32,7 @@ function sanitize(d) {
     level: m.level || 100,
     cultivo: m.cultivo || "Nenhum",
     whatsapp: m.whatsapp || "",
+    obs: m.obs || "",
   }));
   const events = toArr(d.events).map(e => ({
     ...e,
@@ -236,7 +236,7 @@ function MembersTab({ data, save }) {
   const [editId, setEditId] = useState(null);
   const [sortCol, setSortCol] = useState("name");
   const [sortDir, setSortDir] = useState("asc");
-  const blank = {name:"",class:CLASSES[0],level:100,cultivo:CULTIVOS[0],whatsapp:""};
+  const blank = {name:"",class:CLASSES[0],level:100,cultivo:CULTIVOS[0],whatsapp:"",obs:""};
   const [form, setForm] = useState(blank);
 
   const handleSort = (col) => {
@@ -257,15 +257,48 @@ function MembersTab({ data, save }) {
   };
   const classCounts = CLASSES.reduce((a, c) => { a[c] = data.members.filter(m => m.class === c).length; return a; }, {});
 
-  // Sync roster
+  // Sync roster (name-only)
   const [showSync, setShowSync] = useState(false);
   const [syncText, setSyncText] = useState("");
   const [syncResult, setSyncResult] = useState(null);
-  const [ocrLoading, setOcrLoading] = useState(false);
-  const [ocrProgress, setOcrProgress] = useState("");
+
+  // Bulk removal
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState(new Set());
+
+  const toggleSelect = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    if (selected.size === sortedMembers.length) setSelected(new Set());
+    else setSelected(new Set(sortedMembers.map(m => m.id)));
+  };
+
+  const removeSelected = () => {
+    if (selected.size === 0) return;
+    const removeIds = selected;
+    save({
+      ...data,
+      members: data.members.filter(m => !removeIds.has(m.id)),
+      events: (data.events || []).map(e => ({ ...e, present: (e.present || []).filter(id => !removeIds.has(id)) })),
+      twWeeks: (data.twWeeks || []).map(w => ({
+        ...w,
+        confirmed: (w.confirmed || []).filter(id => !removeIds.has(id)),
+        declined: (w.declined || []).filter(id => !removeIds.has(id)),
+      })),
+    });
+    setSelected(new Set());
+    setSelectMode(false);
+  };
 
   const parseSync = (text) => {
-    const lines = text.split("\n").filter(l => l.trim());
+    const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+    // Accept: just names, or name,class,level
     const parsed = lines.map(line => {
       const parts = line.split(/[\t;,]+/).map(s => s.trim());
       if (!parts[0]) return null;
@@ -280,131 +313,6 @@ function MembersTab({ data, save }) {
     const stayPlayers = data.members.filter(m => pastedNames.has(m.name.toLowerCase()));
 
     setSyncResult({ newPlayers, leftPlayers, stayPlayers, totalPasted: parsed.length });
-  };
-
-  const handleOCR = async (files) => {
-    if (!files || files.length === 0) return;
-    setOcrLoading(true);
-    setOcrProgress("Preparando OCR...");
-    let allLines = [];
-
-    try {
-      for (let i = 0; i < files.length; i++) {
-        setOcrProgress(`Processando imagem ${i + 1} de ${files.length}...`);
-        
-        // Preprocess: invert dark game screenshots for better OCR
-        const processed = await preprocessImage(files[i]);
-        
-        setOcrProgress(`Lendo texto ${i + 1}/${files.length}...`);
-        const result = await Tesseract.recognize(processed, "por+eng", {
-          logger: (m) => {
-            if (m.status === "recognizing text") {
-              setOcrProgress(`Imagem ${i + 1}/${files.length}: ${Math.round((m.progress || 0) * 100)}%`);
-            }
-          }
-        });
-
-        const lines = result.data.text.split("\n").filter(l => l.trim());
-        allLines.push(...lines);
-      }
-
-      // Try to parse game table format
-      const parsed = [];
-      for (const line of allLines) {
-        // Skip header/garbage
-        if (/^nome|posição|título|nível|classe|^\W+$/i.test(line.trim())) continue;
-        if (line.trim().length < 2) continue;
-        
-        // Split by multiple spaces or tabs (game table columns)
-        const parts = line.split(/\s{2,}|\t+/).map(s => s.trim()).filter(Boolean);
-        
-        if (parts.length >= 2) {
-          const name = parts[0].replace(/[^a-zA-Z0-9_\-]/g, "");
-          if (name.length < 2) continue;
-          
-          let level = 100;
-          let className = "";
-          
-          // Search for level and class in remaining parts
-          for (const p of parts.slice(1)) {
-            const num = parseInt(p);
-            if (num >= 50 && num <= 120) level = num;
-            const resolved = resolveClass(p);
-            if (CLASSES.includes(resolved)) className = p;
-          }
-          
-          parsed.push(`${name}, ${className || "?"}, ${level}`);
-        } else if (parts.length === 1) {
-          const name = parts[0].replace(/[^a-zA-Z0-9_\-]/g, "");
-          if (name.length >= 2) parsed.push(`${name}, ?, 100`);
-        }
-      }
-
-      // Show raw + parsed for user to verify
-      const rawText = allLines.join("\n");
-      const parsedText = parsed.join("\n");
-      
-      if (parsedText.trim()) {
-        setSyncText(parsedText);
-        parseSync(parsedText);
-        setOcrProgress(`✓ ${parsed.length} nomes detectados. Confira e corrija se necessário.`);
-      } else {
-        // Fallback: show raw OCR for manual editing
-        setSyncText("// OCR bruto (edite manualmente):\n" + rawText);
-        setOcrProgress("OCR não conseguiu parsear a tabela. Texto bruto disponível para edição.");
-      }
-    } catch (err) {
-      console.error("OCR error:", err);
-      setOcrProgress("Erro no OCR. Use Google Lens no celular como alternativa.");
-    }
-    setOcrLoading(false);
-  };
-
-  // Preprocess image: invert colors for dark backgrounds
-  const preprocessImage = (file) => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext("2d");
-        
-        // Draw original
-        ctx.drawImage(img, 0, 0);
-        
-        // Get pixel data and check if dark background
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const pixels = imageData.data;
-        let totalBrightness = 0;
-        const sampleSize = Math.min(pixels.length / 4, 10000);
-        const step = Math.floor(pixels.length / 4 / sampleSize);
-        
-        for (let i = 0; i < pixels.length; i += step * 4) {
-          totalBrightness += (pixels[i] + pixels[i+1] + pixels[i+2]) / 3;
-        }
-        const avgBrightness = totalBrightness / sampleSize;
-        
-        // If dark (game screenshot), invert and increase contrast
-        if (avgBrightness < 128) {
-          for (let i = 0; i < pixels.length; i += 4) {
-            pixels[i] = 255 - pixels[i];       // R
-            pixels[i+1] = 255 - pixels[i+1];   // G
-            pixels[i+2] = 255 - pixels[i+2];   // B
-          }
-          ctx.putImageData(imageData, 0, 0);
-          
-          // Increase contrast
-          ctx.globalCompositeOperation = "source-over";
-          ctx.filter = "contrast(1.5) grayscale(1)";
-          ctx.drawImage(canvas, 0, 0);
-        }
-        
-        canvas.toBlob(blob => resolve(blob || file), "image/png");
-      };
-      img.onerror = () => resolve(file);
-      img.src = URL.createObjectURL(file);
-    });
   };
 
   const applySync = (addNew, removeLeft) => {
@@ -467,7 +375,7 @@ function MembersTab({ data, save }) {
     setForm(blank); setShow(false);
   };
 
-  const startEdit = (m) => { setForm({name:m.name,class:m.class,level:m.level,cultivo:m.cultivo,whatsapp:m.whatsapp}); setEditId(m.id); setShow(true); };
+  const startEdit = (m) => { setForm({name:m.name,class:m.class,level:m.level,cultivo:m.cultivo,whatsapp:m.whatsapp,obs:m.obs||""}); setEditId(m.id); setShow(false); };
   const remove = (id) => {
     save({
       ...data,
@@ -480,9 +388,9 @@ function MembersTab({ data, save }) {
 
   const exportExcel = () => {
     if (data.members.length === 0) return;
-    const rows = data.members.map(m => ({ Nome:m.name, Classe:m.class, "Nível":m.level, Cultivo:m.cultivo, WhatsApp:m.whatsapp||"" }));
+    const rows = data.members.map(m => ({ Nome:m.name, Classe:m.class, "Nível":m.level, Cultivo:m.cultivo, WhatsApp:m.whatsapp||"", Obs:m.obs||"" }));
     const ws = XLSX.utils.json_to_sheet(rows);
-    ws["!cols"] = [{wch:20},{wch:8},{wch:8},{wch:22},{wch:18}];
+    ws["!cols"] = [{wch:20},{wch:8},{wch:8},{wch:22},{wch:18},{wch:12}];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Membros ROMA");
     XLSX.writeFile(wb, "ROMA_Membros.xlsx");
@@ -494,7 +402,8 @@ function MembersTab({ data, save }) {
         <span>Membros</span>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {data.members.length > 0 && <button className="btn btn-green" onClick={exportExcel}>{Ico.download} Excel</button>}
-          <button className="btn" style={{borderColor:"rgba(201,168,76,.4)",color:"var(--gold-b)",background:"rgba(201,168,76,.08)"}} onClick={()=>{setShowSync(!showSync);setShow(false);setShowBulk(false);setSyncResult(null);setSyncText("");}}>🔄 Sincronizar Lista</button>
+          <button className="btn" style={{borderColor:"rgba(201,168,76,.4)",color:"var(--gold-b)",background:"rgba(201,168,76,.08)"}} onClick={()=>{setShowSync(!showSync);setShow(false);setShowBulk(false);setSyncResult(null);setSyncText("");}}>🔄 Sincronizar</button>
+          {data.members.length > 0 && <button className={`btn ${selectMode?"btn-d":"btn-blue"}`} onClick={()=>{setSelectMode(!selectMode);setSelected(new Set());}}>{selectMode?"✗ Cancelar Seleção":"☑ Selecionar p/ Remover"}</button>}
           <button className="btn btn-blue" onClick={()=>{setShowBulk(!showBulk);setShow(false);setShowSync(false);}}>⚡ Importar em Massa</button>
           <button className="btn" onClick={()=>{setEditId(null);setForm(blank);setShow(!show);setShowBulk(false);setShowSync(false);}}>{Ico.plus} Cadastrar</button>
         </div>
@@ -506,34 +415,15 @@ function MembersTab({ data, save }) {
           <div style={{marginBottom:8}}>
             <label style={{fontFamily:"'Cinzel',serif",fontSize:".6rem",letterSpacing:2,textTransform:"uppercase",color:"var(--gold)"}}>Sincronizar com Lista Atual do Clã</label>
             <div style={{fontSize:".78rem",color:"var(--text-d)",marginTop:2,marginBottom:8,lineHeight:1.6}}>
-              Cole a lista <strong style={{color:"var(--gold)"}}>completa e atual</strong> de membros do clã, ou <strong style={{color:"var(--gold)"}}>envie prints</strong> da tela de membros do jogo.
+              Cole a lista <strong style={{color:"var(--gold)"}}>completa e atual</strong> de membros do clã.
+              Aceita <strong style={{color:"var(--text)"}}>só nomes</strong> (um por linha) ou <strong style={{color:"var(--text)"}}>Nome, Classe, Nível</strong>.
               <br/>O sistema compara e mostra quem <span style={{color:"var(--green-l)"}}>entrou</span> e quem <span style={{color:"var(--red-l)"}}>saiu</span>.
             </div>
 
-            {/* Image upload */}
-            <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center",flexWrap:"wrap"}}>
-              <label className="btn btn-blue" style={{cursor:"pointer",position:"relative"}}>
-                📷 Enviar Prints do Jogo
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={e => handleOCR(e.target.files)}
-                  style={{position:"absolute",opacity:0,width:0,height:0}}
-                  disabled={ocrLoading}
-                />
-              </label>
-              {ocrLoading && (
-                <span style={{fontSize:".8rem",color:"var(--gold)",fontStyle:"italic"}}>{ocrProgress}</span>
-              )}
-              <span style={{fontSize:".7rem",color:"var(--text-d)"}}>Aceita múltiplas imagens · <strong>Dica:</strong> use o Google Lens no celular pra copiar texto da tela do jogo</span>
-            </div>
-
-            <div style={{fontSize:".7rem",color:"var(--text-d)",marginBottom:6}}>Ou cole manualmente (Nome, Classe, Nível):</div>
             <textarea
               value={syncText}
               onChange={e => { setSyncText(e.target.value); if (e.target.value.trim()) parseSync(e.target.value); else setSyncResult(null); }}
-              placeholder={"Cole a lista completa do clã aqui:\nJogador1, WB, 101\nJogador2, PSY, 105\n..."}
+              placeholder={"Cole a lista completa do clã aqui:\nbolo\nSupri\nTunico\nNikzinhuuum\n\nOu com classe e nível:\nbolo, WB, 101\nSupri, EA, 101"}
               style={{width:"100%",minHeight:140,resize:"vertical"}}
             />
           </div>
@@ -659,7 +549,7 @@ function MembersTab({ data, save }) {
         </div>
       )}
 
-      {show && (
+      {show && !editId && (
         <div className="form-box">
           <div className="fr">
             <div className="fg"><label>Nome</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Nick"/></div>
@@ -669,9 +559,10 @@ function MembersTab({ data, save }) {
           <div className="fr">
             <div className="fg"><label>Cultivo</label><select value={form.cultivo} onChange={e=>setForm({...form,cultivo:e.target.value})}>{CULTIVOS.map(c=><option key={c}>{c}</option>)}</select></div>
             <div className="fg"><label>WhatsApp</label><input value={form.whatsapp} onChange={e=>setForm({...form,whatsapp:e.target.value})} placeholder="(99) 99999-9999"/></div>
+            <div className="fg"><label>Obs</label><input value={form.obs} onChange={e=>setForm({...form,obs:e.target.value})} placeholder="Ex: SEC"/></div>
           </div>
           <div style={{display:"flex",gap:8}}>
-            <button className="btn" onClick={submit}>{Ico.check} {editId?"Salvar":"Cadastrar"}</button>
+            <button className="btn" onClick={submit}>{Ico.check} Cadastrar</button>
             <button className="btn btn-d" onClick={cancel}>Cancelar</button>
           </div>
         </div>
@@ -694,29 +585,79 @@ function MembersTab({ data, save }) {
               </div>
             ))}
           </div>
+          {/* Bulk removal bar */}
+          {selectMode && (
+            <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:10,padding:"10px 14px",background:"rgba(155,44,44,.08)",border:"1px solid rgba(155,44,44,.25)",borderRadius:4,flexWrap:"wrap"}}>
+              <button className="btn btn-s" onClick={selectAll} style={{color:"var(--gold)"}}>
+                {selected.size === sortedMembers.length ? "Desmarcar Todos" : "Selecionar Todos"}
+              </button>
+              <span style={{fontSize:".8rem",color:"var(--text-d)",flex:1}}>
+                <strong style={{color:"var(--red-l)"}}>{selected.size}</strong> selecionado{selected.size !== 1 ? "s" : ""}
+              </span>
+              {selected.size > 0 && (
+                <button className="btn btn-d" onClick={removeSelected}>
+                  {Ico.trash} Remover {selected.size} membro{selected.size !== 1 ? "s" : ""}
+                </button>
+              )}
+            </div>
+          )}
           <div className="tbl"><table>
             <thead><tr>
+              {selectMode && <th style={{width:30}}></th>}
               <th style={{cursor:"pointer",userSelect:"none"}} onClick={()=>handleSort("name")}>Nome <SortIco col="name"/></th>
               <th style={{cursor:"pointer",userSelect:"none"}} onClick={()=>handleSort("class")}>Classe <SortIco col="class"/></th>
               <th style={{cursor:"pointer",userSelect:"none"}} onClick={()=>handleSort("level")}>Nível <SortIco col="level"/></th>
               <th style={{cursor:"pointer",userSelect:"none"}} onClick={()=>handleSort("cultivo")}>Cultivo <SortIco col="cultivo"/></th>
               <th>WhatsApp</th>
-              <th></th>
+              <th>Obs</th>
+              {!selectMode && <th></th>}
             </tr></thead>
             <tbody>
-              {sortedMembers.map(m=>(
-                <tr key={m.id}>
-                  <td style={{fontWeight:600}}>{m.name}</td>
-                  <td><span className="badge" style={{background:cc(m.class)+"22",color:cc(m.class),border:`1px solid ${cc(m.class)}55`}}>{m.class}</span></td>
-                  <td>{m.level}</td>
-                  <td><span className="badge b-gold">{m.cultivo}</span></td>
-                  <td style={{fontSize:".85rem",color:"var(--text-d)"}}>{m.whatsapp||"—"}</td>
-                  <td style={{whiteSpace:"nowrap"}}>
-                    <button className="btn btn-s" onClick={()=>startEdit(m)} style={{marginRight:4}}>{Ico.edit}</button>
-                    <button className="btn btn-s btn-d" onClick={()=>remove(m.id)}>{Ico.trash}</button>
-                  </td>
+              {sortedMembers.map(m=>{
+                const isEditing = editId === m.id;
+                return (
+                <tr key={m.id}
+                  onClick={selectMode ? ()=>toggleSelect(m.id) : undefined}
+                  style={selectMode ? {cursor:"pointer"} : isEditing ? {background:"rgba(201,168,76,.05)"} : {}}
+                >
+                  {selectMode && <td>
+                    <span style={{
+                      width:18,height:18,borderRadius:3,display:"flex",alignItems:"center",justifyContent:"center",
+                      background: selected.has(m.id) ? "var(--red)" : "var(--bg-i)",
+                      border: `1.5px solid ${selected.has(m.id) ? "var(--red-l)" : "var(--border-g)"}`,
+                      transition:"all .15s"
+                    }}>{selected.has(m.id) && Ico.check}</span>
+                  </td>}
+
+                  {isEditing ? (
+                    <>
+                      <td><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} style={{width:"100%",padding:"4px 6px",fontSize:".85rem"}}/></td>
+                      <td><select value={form.class} onChange={e=>setForm({...form,class:e.target.value})} style={{padding:"4px 4px",fontSize:".8rem"}}>{CLASSES.map(c=><option key={c}>{c}</option>)}</select></td>
+                      <td><input type="number" value={form.level} onChange={e=>setForm({...form,level:+e.target.value})} style={{width:60,padding:"4px 6px",fontSize:".85rem"}}/></td>
+                      <td><select value={form.cultivo} onChange={e=>setForm({...form,cultivo:e.target.value})} style={{padding:"4px 4px",fontSize:".75rem"}}>{CULTIVOS.map(c=><option key={c}>{c}</option>)}</select></td>
+                      <td><input value={form.whatsapp} onChange={e=>setForm({...form,whatsapp:e.target.value})} placeholder="(99) 99999-9999" style={{width:"100%",padding:"4px 6px",fontSize:".82rem"}}/></td>
+                      <td><input value={form.obs||""} onChange={e=>setForm({...form,obs:e.target.value})} placeholder="Ex: SEC" style={{width:"100%",padding:"4px 6px",fontSize:".82rem"}}/></td>
+                      <td style={{whiteSpace:"nowrap"}}>
+                        <button className="btn btn-s btn-green" onClick={submit} style={{marginRight:4}}>{Ico.check}</button>
+                        <button className="btn btn-s btn-d" onClick={cancel}>✗</button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td style={{fontWeight:600}}>{m.name}</td>
+                      <td><span className="badge" style={{background:cc(m.class)+"22",color:cc(m.class),border:`1px solid ${cc(m.class)}55`}}>{m.class}</span></td>
+                      <td>{m.level}</td>
+                      <td><span className="badge b-gold">{m.cultivo}</span></td>
+                      <td style={{fontSize:".85rem",color:"var(--text-d)"}}>{m.whatsapp||"—"}</td>
+                      <td style={{fontSize:".82rem",color:m.obs?"var(--gold)":"var(--text-d)",fontWeight:m.obs?600:400}}>{m.obs||"—"}</td>
+                      {!selectMode && <td style={{whiteSpace:"nowrap"}}>
+                        <button className="btn btn-s" onClick={()=>startEdit(m)} style={{marginRight:4}}>{Ico.edit}</button>
+                        <button className="btn btn-s btn-d" onClick={()=>remove(m.id)}>{Ico.trash}</button>
+                      </td>}
+                    </>
+                  )}
                 </tr>
-              ))}
+              );})}
             </tbody>
           </table></div>
           <ClassChart members={data.members}/>
