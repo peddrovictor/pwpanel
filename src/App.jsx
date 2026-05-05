@@ -286,67 +286,125 @@ function MembersTab({ data, save }) {
     if (!files || files.length === 0) return;
     setOcrLoading(true);
     setOcrProgress("Preparando OCR...");
-    let allText = "";
+    let allLines = [];
 
     try {
       for (let i = 0; i < files.length; i++) {
-        setOcrProgress(`Lendo imagem ${i + 1} de ${files.length}...`);
-        const result = await Tesseract.recognize(files[i], "por+eng", {
+        setOcrProgress(`Processando imagem ${i + 1} de ${files.length}...`);
+        
+        // Preprocess: invert dark game screenshots for better OCR
+        const processed = await preprocessImage(files[i]);
+        
+        setOcrProgress(`Lendo texto ${i + 1}/${files.length}...`);
+        const result = await Tesseract.recognize(processed, "por+eng", {
           logger: (m) => {
             if (m.status === "recognizing text") {
               setOcrProgress(`Imagem ${i + 1}/${files.length}: ${Math.round((m.progress || 0) * 100)}%`);
             }
           }
         });
-        allText += result.data.text + "\n";
+
+        const lines = result.data.text.split("\n").filter(l => l.trim());
+        allLines.push(...lines);
       }
 
-      // Parse OCR output: try to extract Name, Level, Class from game table
-      const lines = allText.split("\n").filter(l => l.trim());
+      // Try to parse game table format
       const parsed = [];
-
-      for (const line of lines) {
-        // Skip header lines
-        if (/^nome|posição|título|nível|classe/i.test(line.trim())) continue;
+      for (const line of allLines) {
+        // Skip header/garbage
+        if (/^nome|posição|título|nível|classe|^\W+$/i.test(line.trim())) continue;
+        if (line.trim().length < 2) continue;
         
-        // Game table format: Name | Position | Title | Level | Class
-        // Try to extract using common patterns
+        // Split by multiple spaces or tabs (game table columns)
         const parts = line.split(/\s{2,}|\t+/).map(s => s.trim()).filter(Boolean);
         
-        if (parts.length >= 3) {
-          const name = parts[0];
-          // Skip if name looks like garbage
-          if (name.length < 2 || /^[^a-zA-Z]/.test(name)) continue;
+        if (parts.length >= 2) {
+          const name = parts[0].replace(/[^a-zA-Z0-9_\-]/g, "");
+          if (name.length < 2) continue;
           
-          // Find level (a number around 80-110)
           let level = 100;
           let className = "";
           
-          for (const p of parts) {
+          // Search for level and class in remaining parts
+          for (const p of parts.slice(1)) {
             const num = parseInt(p);
-            if (num >= 50 && num <= 120) { level = num; }
-          }
-          
-          // Last part is usually the class
-          const lastPart = parts[parts.length - 1];
-          const resolved = resolveClass(lastPart);
-          if (CLASSES.includes(resolved)) {
-            className = lastPart;
+            if (num >= 50 && num <= 120) level = num;
+            const resolved = resolveClass(p);
+            if (CLASSES.includes(resolved)) className = p;
           }
           
           parsed.push(`${name}, ${className || "?"}, ${level}`);
+        } else if (parts.length === 1) {
+          const name = parts[0].replace(/[^a-zA-Z0-9_\-]/g, "");
+          if (name.length >= 2) parsed.push(`${name}, ?, 100`);
         }
       }
 
-      const result = parsed.join("\n");
-      setSyncText(result);
-      if (result.trim()) parseSync(result);
-      setOcrProgress("");
+      // Show raw + parsed for user to verify
+      const rawText = allLines.join("\n");
+      const parsedText = parsed.join("\n");
+      
+      if (parsedText.trim()) {
+        setSyncText(parsedText);
+        parseSync(parsedText);
+        setOcrProgress(`✓ ${parsed.length} nomes detectados. Confira e corrija se necessário.`);
+      } else {
+        // Fallback: show raw OCR for manual editing
+        setSyncText("// OCR bruto (edite manualmente):\n" + rawText);
+        setOcrProgress("OCR não conseguiu parsear a tabela. Texto bruto disponível para edição.");
+      }
     } catch (err) {
       console.error("OCR error:", err);
-      setOcrProgress("Erro no OCR. Tente colar manualmente.");
+      setOcrProgress("Erro no OCR. Use Google Lens no celular como alternativa.");
     }
     setOcrLoading(false);
+  };
+
+  // Preprocess image: invert colors for dark backgrounds
+  const preprocessImage = (file) => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        
+        // Draw original
+        ctx.drawImage(img, 0, 0);
+        
+        // Get pixel data and check if dark background
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const pixels = imageData.data;
+        let totalBrightness = 0;
+        const sampleSize = Math.min(pixels.length / 4, 10000);
+        const step = Math.floor(pixels.length / 4 / sampleSize);
+        
+        for (let i = 0; i < pixels.length; i += step * 4) {
+          totalBrightness += (pixels[i] + pixels[i+1] + pixels[i+2]) / 3;
+        }
+        const avgBrightness = totalBrightness / sampleSize;
+        
+        // If dark (game screenshot), invert and increase contrast
+        if (avgBrightness < 128) {
+          for (let i = 0; i < pixels.length; i += 4) {
+            pixels[i] = 255 - pixels[i];       // R
+            pixels[i+1] = 255 - pixels[i+1];   // G
+            pixels[i+2] = 255 - pixels[i+2];   // B
+          }
+          ctx.putImageData(imageData, 0, 0);
+          
+          // Increase contrast
+          ctx.globalCompositeOperation = "source-over";
+          ctx.filter = "contrast(1.5) grayscale(1)";
+          ctx.drawImage(canvas, 0, 0);
+        }
+        
+        canvas.toBlob(blob => resolve(blob || file), "image/png");
+      };
+      img.onerror = () => resolve(file);
+      img.src = URL.createObjectURL(file);
+    });
   };
 
   const applySync = (addNew, removeLeft) => {
@@ -468,7 +526,7 @@ function MembersTab({ data, save }) {
               {ocrLoading && (
                 <span style={{fontSize:".8rem",color:"var(--gold)",fontStyle:"italic"}}>{ocrProgress}</span>
               )}
-              <span style={{fontSize:".7rem",color:"var(--text-d)"}}>Aceita múltiplas imagens</span>
+              <span style={{fontSize:".7rem",color:"var(--text-d)"}}>Aceita múltiplas imagens · <strong>Dica:</strong> use o Google Lens no celular pra copiar texto da tela do jogo</span>
             </div>
 
             <div style={{fontSize:".7rem",color:"var(--text-d)",marginBottom:6}}>Ou cole manualmente (Nome, Classe, Nível):</div>
