@@ -730,6 +730,8 @@ function TWTab({ data, save }) {
   const [show, setShow] = useState(false);
   const [expanded, setExpanded] = useState({});
   const [weekLabel, setWeekLabel] = useState("");
+  const [sortCol, setSortCol] = useState("name"); // name, class
+  const [sortDir, setSortDir] = useState("asc");
   const createWeek = () => { if(!weekLabel.trim()) return; save({...data,twWeeks:[{id:Date.now(),label:weekLabel,confirmed:[],declined:[]},...(data.twWeeks||[])]}); setWeekLabel(""); setShow(false); };
   const removeWeek = (id) => save({...data,twWeeks:(data.twWeeks||[]).filter(w=>w.id!==id)});
   const toggleExpand = (id) => setExpanded(e=>({...e,[id]:!e[id]}));
@@ -741,73 +743,141 @@ function TWTab({ data, save }) {
     })});
   };
 
+  const handleSort = (col) => {
+    if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortCol(col); setSortDir("asc"); }
+  };
+
+  const sortMembers = (list) => {
+    return [...list].sort((a, b) => {
+      let cmp = 0;
+      if (sortCol === "class") cmp = a.class.localeCompare(b.class);
+      else cmp = a.name.localeCompare(b.name);
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  };
+
+  const SortIcon = ({ col }) => {
+    if (sortCol !== col) return <span style={{opacity:.3,fontSize:".6rem"}}>⇅</span>;
+    return <span style={{fontSize:".6rem"}}>{sortDir === "asc" ? "▲" : "▼"}</span>;
+  };
+
+  // Class summary
+  const classCounts = CLASSES.reduce((a, c) => { a[c] = data.members.filter(m => m.class === c).length; return a; }, {});
+
   return (
-    <div className="card">
-      <div className="card-t">
-        <span>Controle Semanal — TW</span>
-        <button className="btn" onClick={()=>setShow(!show)}>{Ico.plus} Nova Semana</button>
-      </div>
-      {show&&(<div className="form-box"><div className="fr"><div className="fg"><label>Identificação</label><input value={weekLabel} onChange={e=>setWeekLabel(e.target.value)} placeholder="Ex: Semana 05/05 — TW vs Phoenix"/></div></div><button className="btn" onClick={createWeek}>{Ico.check} Criar</button></div>)}
-      {data.members.length===0?<div className="empty">Cadastre membros primeiro.</div>
-        :(data.twWeeks||[]).length===0?<div className="empty">Nenhuma semana de TW criada.</div>
-        :(data.twWeeks||[]).map(week=>{
-          const conf=week.confirmed||[]; const decl=week.declined||[];
-          const pending=data.members.filter(m=>!conf.includes(m.id)&&!decl.includes(m.id));
-          const confM=data.members.filter(m=>conf.includes(m.id));
-          const declM=data.members.filter(m=>decl.includes(m.id));
-          const isOpen = expanded[week.id];
-          return (
-            <div key={week.id} className="tw-week" style={{padding:0,overflow:"hidden"}}>
-              {/* Collapsed header */}
-              <div
-                style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",cursor:"pointer",gap:8}}
-                onClick={()=>toggleExpand(week.id)}
-              >
-                <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
-                  <span style={{color:"var(--text-d)",flexShrink:0,transition:"transform .2s",transform:isOpen?"rotate(90deg)":"none"}}>{Ico.chevRight}</span>
-                  <span style={{fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:".85rem",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{week.label}</span>
-                </div>
-                <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",flexShrink:0}}>
-                  <span className="badge b-green">{conf.length} vão</span>
-                  <span className="badge b-red">{decl.length} não vão</span>
-                  <span className="badge b-gold">{pending.length} pend.</span>
-                  <button className="btn btn-s btn-d" onClick={e=>{e.stopPropagation();removeWeek(week.id);}}>{Ico.trash}</button>
-                </div>
+    <div>
+      {/* CLASS SUMMARY BAR */}
+      {data.members.length > 0 && (
+        <div className="card" style={{marginBottom:14}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <div style={{fontFamily:"'Cinzel',serif",fontSize:".7rem",letterSpacing:2,textTransform:"uppercase",color:"var(--gold)",marginRight:8}}>
+              <span style={{fontSize:"1.2rem",fontWeight:700,marginRight:4}}>{data.members.length}</span>membros
+            </div>
+            <div style={{width:1,height:24,background:"var(--border-g)"}}/>
+            {CLASSES.map(c => classCounts[c] > 0 && (
+              <div key={c} style={{display:"flex",alignItems:"center",gap:4}}>
+                <span style={{width:10,height:10,borderRadius:2,background:cc(c),display:"inline-block"}}/>
+                <span style={{fontFamily:"'Cinzel',serif",fontSize:".7rem",fontWeight:700,color:cc(c),letterSpacing:1}}>{c}</span>
+                <span style={{fontSize:".8rem",fontWeight:600,color:"var(--text)"}}>{classCounts[c]}</span>
               </div>
-              {/* Expanded content */}
-              {isOpen && (
-                <div style={{padding:"0 16px 16px"}}>
-                  {pending.length>0&&(
-                    <div style={{marginBottom:12}}>
-                      <div style={{fontFamily:"'Cinzel',serif",fontSize:".6rem",letterSpacing:2,textTransform:"uppercase",color:"var(--gold)",marginBottom:6,paddingBottom:4,borderBottom:"1px solid var(--border)"}}>Aguardando ({pending.length})</div>
-                      {pending.map(m=>(
-                        <div key={m.id} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 8px",marginBottom:3,fontSize:".85rem"}}>
-                          <span style={{flex:1,fontWeight:600}}>{m.name}</span>
-                          <span style={{fontSize:".75rem",color:"var(--text-d)",marginRight:8}}>{m.class}</span>
-                          <button className="btn btn-s btn-green" onClick={()=>togglePlayer(week.id,m.id,"confirm")}>✓ Vai</button>
-                          <button className="btn btn-s btn-d" onClick={()=>togglePlayer(week.id,m.id,"decline")}>✗ Não vai</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="tw-cols">
-                    <div>
-                      <div className="tw-col-h go">Confirmados ({confM.length})</div>
-                      {confM.length===0?<div style={{fontSize:".8rem",color:"var(--text-d)",fontStyle:"italic",padding:"4px 8px"}}>Ninguém confirmado</div>
-                        :confM.map(m=>(<div key={m.id} className="tw-player go" onClick={()=>togglePlayer(week.id,m.id,"confirm")}><span style={{color:"var(--green-l)",marginRight:4}}>●</span><span style={{fontWeight:600,flex:1}}>{m.name}</span><span style={{fontSize:".75rem",color:"var(--text-d)"}}>{m.class}</span></div>))}
-                    </div>
-                    <div>
-                      <div className="tw-col-h no">Não Participam ({declM.length})</div>
-                      {declM.length===0?<div style={{fontSize:".8rem",color:"var(--text-d)",fontStyle:"italic",padding:"4px 8px"}}>—</div>
-                        :declM.map(m=>(<div key={m.id} className="tw-player no" onClick={()=>togglePlayer(week.id,m.id,"decline")}><span style={{color:"var(--red-l)",marginRight:4}}>●</span><span style={{flex:1}}>{m.name}</span><span style={{fontSize:".75rem"}}>{m.class}</span></div>))}
-                    </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <div className="card-t">
+          <span>Controle Semanal — TW</span>
+          <button className="btn" onClick={()=>setShow(!show)}>{Ico.plus} Nova Semana</button>
+        </div>
+        {show&&(<div className="form-box"><div className="fr"><div className="fg"><label>Identificação</label><input value={weekLabel} onChange={e=>setWeekLabel(e.target.value)} placeholder="Ex: Semana 05/05 — TW vs Phoenix"/></div></div><button className="btn" onClick={createWeek}>{Ico.check} Criar</button></div>)}
+        {data.members.length===0?<div className="empty">Cadastre membros primeiro.</div>
+          :(data.twWeeks||[]).length===0?<div className="empty">Nenhuma semana de TW criada.</div>
+          :(data.twWeeks||[]).map(week=>{
+            const conf=week.confirmed||[]; const decl=week.declined||[];
+            const pending=data.members.filter(m=>!conf.includes(m.id)&&!decl.includes(m.id));
+            const confM=data.members.filter(m=>conf.includes(m.id));
+            const declM=data.members.filter(m=>decl.includes(m.id));
+            const isOpen = expanded[week.id];
+
+            // Class breakdown for confirmed
+            const confClassCounts = CLASSES.reduce((a,c)=>{ a[c]=confM.filter(m=>m.class===c).length; return a; },{});
+
+            return (
+              <div key={week.id} className="tw-week" style={{padding:0,overflow:"hidden"}}>
+                {/* Collapsed header */}
+                <div
+                  style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",cursor:"pointer",gap:8}}
+                  onClick={()=>toggleExpand(week.id)}
+                >
+                  <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
+                    <span style={{color:"var(--text-d)",flexShrink:0,transition:"transform .2s",transform:isOpen?"rotate(90deg)":"none"}}>{Ico.chevRight}</span>
+                    <span style={{fontFamily:"'Cinzel',serif",fontWeight:700,fontSize:".85rem",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{week.label}</span>
+                  </div>
+                  <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",flexShrink:0}}>
+                    <span className="badge b-green">{conf.length} vão</span>
+                    <span className="badge b-red">{decl.length} não vão</span>
+                    <span className="badge b-gold">{pending.length} pend.</span>
+                    <button className="btn btn-s btn-d" onClick={e=>{e.stopPropagation();removeWeek(week.id);}}>{Ico.trash}</button>
                   </div>
                 </div>
-              )}
-            </div>
-          );
-        })
-      }
+                {/* Expanded content */}
+                {isOpen && (
+                  <div style={{padding:"0 16px 16px"}}>
+                    {/* Confirmed class breakdown */}
+                    {confM.length > 0 && (
+                      <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
+                        <span style={{fontFamily:"'Cinzel',serif",fontSize:".55rem",letterSpacing:2,textTransform:"uppercase",color:"var(--text-d)"}}>Composição:</span>
+                        {CLASSES.map(c => confClassCounts[c] > 0 && (
+                          <span key={c} style={{fontSize:".6rem",padding:"2px 6px",borderRadius:2,background:cc(c)+"18",color:cc(c),border:`1px solid ${cc(c)}40`,fontFamily:"'Cinzel',serif",letterSpacing:1,fontWeight:600}}>
+                            {confClassCounts[c]}x {c}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {pending.length>0&&(
+                      <div style={{marginBottom:12}}>
+                        <div style={{fontFamily:"'Cinzel',serif",fontSize:".6rem",letterSpacing:2,textTransform:"uppercase",color:"var(--gold)",marginBottom:6,paddingBottom:4,borderBottom:"1px solid var(--border)"}}>Aguardando ({pending.length})</div>
+                        {/* Sortable header */}
+                        <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 8px",marginBottom:2}}>
+                          <span onClick={()=>handleSort("name")} style={{flex:1,fontFamily:"'Cinzel',serif",fontSize:".55rem",letterSpacing:2,textTransform:"uppercase",color:"var(--text-d)",cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:4}}>
+                            Nome <SortIcon col="name"/>
+                          </span>
+                          <span onClick={()=>handleSort("class")} style={{fontFamily:"'Cinzel',serif",fontSize:".55rem",letterSpacing:2,textTransform:"uppercase",color:"var(--text-d)",cursor:"pointer",userSelect:"none",display:"flex",alignItems:"center",gap:4,marginRight:140}}>
+                            Classe <SortIcon col="class"/>
+                          </span>
+                        </div>
+                        {sortMembers(pending).map(m=>(
+                          <div key={m.id} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 8px",marginBottom:3,fontSize:".85rem"}}>
+                            <span style={{flex:1,fontWeight:600}}>{m.name}</span>
+                            <span style={{fontSize:".65rem",color:cc(m.class),fontFamily:"'Cinzel',serif",letterSpacing:1,width:35,textAlign:"center"}}>{m.class}</span>
+                            <button className="btn btn-s btn-green" onClick={()=>togglePlayer(week.id,m.id,"confirm")}>✓ Vai</button>
+                            <button className="btn btn-s btn-d" onClick={()=>togglePlayer(week.id,m.id,"decline")}>✗ Não vai</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="tw-cols">
+                      <div>
+                        <div className="tw-col-h go">Confirmados ({confM.length})</div>
+                        {confM.length===0?<div style={{fontSize:".8rem",color:"var(--text-d)",fontStyle:"italic",padding:"4px 8px"}}>Ninguém confirmado</div>
+                          :sortMembers(confM).map(m=>(<div key={m.id} className="tw-player go" onClick={()=>togglePlayer(week.id,m.id,"confirm")}><span style={{color:"var(--green-l)",marginRight:4}}>●</span><span style={{fontWeight:600,flex:1}}>{m.name}</span><span style={{fontSize:".7rem",color:cc(m.class),fontFamily:"'Cinzel',serif"}}>{m.class}</span></div>))}
+                      </div>
+                      <div>
+                        <div className="tw-col-h no">Não Participam ({declM.length})</div>
+                        {declM.length===0?<div style={{fontSize:".8rem",color:"var(--text-d)",fontStyle:"italic",padding:"4px 8px"}}>—</div>
+                          :sortMembers(declM).map(m=>(<div key={m.id} className="tw-player no" onClick={()=>togglePlayer(week.id,m.id,"decline")}><span style={{color:"var(--red-l)",marginRight:4}}>●</span><span style={{flex:1}}>{m.name}</span><span style={{fontSize:".7rem"}}>{m.class}</span></div>))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        }
+      </div>
     </div>
   );
 }
