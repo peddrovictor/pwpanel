@@ -233,8 +233,28 @@ function MembersTab({ data, save }) {
   const [bulkText, setBulkText] = useState("");
   const [bulkPreview, setBulkPreview] = useState([]);
   const [editId, setEditId] = useState(null);
+  const [sortCol, setSortCol] = useState("name");
+  const [sortDir, setSortDir] = useState("asc");
   const blank = {name:"",class:CLASSES[0],level:100,cultivo:CULTIVOS[0],whatsapp:""};
   const [form, setForm] = useState(blank);
+
+  const handleSort = (col) => {
+    if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortCol(col); setSortDir("asc"); }
+  };
+  const sortedMembers = [...data.members].sort((a, b) => {
+    let cmp = 0;
+    if (sortCol === "class") cmp = (a.class||"").localeCompare(b.class||"");
+    else if (sortCol === "level") cmp = (a.level||0) - (b.level||0);
+    else if (sortCol === "cultivo") cmp = (a.cultivo||"").localeCompare(b.cultivo||"");
+    else cmp = (a.name||"").localeCompare(b.name||"");
+    return sortDir === "asc" ? cmp : -cmp;
+  });
+  const SortIco = ({ col }) => {
+    if (sortCol !== col) return <span style={{opacity:.3,fontSize:".55rem"}}>⇅</span>;
+    return <span style={{fontSize:".55rem"}}>{sortDir === "asc" ? "▲" : "▼"}</span>;
+  };
+  const classCounts = CLASSES.reduce((a, c) => { a[c] = data.members.filter(m => m.class === c).length; return a; }, {});
 
   const parseBulk = (text) => {
     const lines = text.split("\n").filter(l => l.trim());
@@ -361,10 +381,31 @@ function MembersTab({ data, save }) {
       {data.members.length===0
         ? <div className="empty">Nenhum membro cadastrado ainda.</div>
         : <>
+          {/* CLASS SUMMARY */}
+          <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:14,padding:"10px 14px",background:"var(--bg)",borderRadius:4}}>
+            <div style={{fontFamily:"'Cinzel',serif",fontSize:".7rem",letterSpacing:2,textTransform:"uppercase",color:"var(--gold)",marginRight:4}}>
+              <span style={{fontSize:"1.2rem",fontWeight:700,marginRight:4}}>{data.members.length}</span>membros
+            </div>
+            <div style={{width:1,height:24,background:"var(--border-g)"}}/>
+            {CLASSES.map(c => classCounts[c] > 0 && (
+              <div key={c} style={{display:"flex",alignItems:"center",gap:4}}>
+                <span style={{width:10,height:10,borderRadius:2,background:cc(c),display:"inline-block"}}/>
+                <span style={{fontFamily:"'Cinzel',serif",fontSize:".7rem",fontWeight:700,color:cc(c),letterSpacing:1}}>{c}</span>
+                <span style={{fontSize:".8rem",fontWeight:600,color:"var(--text)"}}>{classCounts[c]}</span>
+              </div>
+            ))}
+          </div>
           <div className="tbl"><table>
-            <thead><tr><th>Nome</th><th>Classe</th><th>Nível</th><th>Cultivo</th><th>WhatsApp</th><th></th></tr></thead>
+            <thead><tr>
+              <th style={{cursor:"pointer",userSelect:"none"}} onClick={()=>handleSort("name")}>Nome <SortIco col="name"/></th>
+              <th style={{cursor:"pointer",userSelect:"none"}} onClick={()=>handleSort("class")}>Classe <SortIco col="class"/></th>
+              <th style={{cursor:"pointer",userSelect:"none"}} onClick={()=>handleSort("level")}>Nível <SortIco col="level"/></th>
+              <th style={{cursor:"pointer",userSelect:"none"}} onClick={()=>handleSort("cultivo")}>Cultivo <SortIco col="cultivo"/></th>
+              <th>WhatsApp</th>
+              <th></th>
+            </tr></thead>
             <tbody>
-              {data.members.map(m=>(
+              {sortedMembers.map(m=>(
                 <tr key={m.id}>
                   <td style={{fontWeight:600}}>{m.name}</td>
                   <td><span className="badge" style={{background:cc(m.class)+"22",color:cc(m.class),border:`1px solid ${cc(m.class)}55`}}>{m.class}</span></td>
