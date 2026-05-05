@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Cell, ResponsiveContainer } from "recharts";
+import Tesseract from "tesseract.js";
 import { storage } from "./firebase";
 import { Ico } from "./Icons";
 import {
@@ -256,6 +257,127 @@ function MembersTab({ data, save }) {
   };
   const classCounts = CLASSES.reduce((a, c) => { a[c] = data.members.filter(m => m.class === c).length; return a; }, {});
 
+  // Sync roster
+  const [showSync, setShowSync] = useState(false);
+  const [syncText, setSyncText] = useState("");
+  const [syncResult, setSyncResult] = useState(null);
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState("");
+
+  const parseSync = (text) => {
+    const lines = text.split("\n").filter(l => l.trim());
+    const parsed = lines.map(line => {
+      const parts = line.split(/[\t;,]+/).map(s => s.trim());
+      if (!parts[0]) return null;
+      return { name: parts[0], class: resolveClass(parts[1] || ""), level: parseInt(parts[2]) || 100 };
+    }).filter(Boolean);
+
+    const pastedNames = new Set(parsed.map(p => p.name.toLowerCase()));
+    const existingNames = new Set(data.members.map(m => m.name.toLowerCase()));
+
+    const newPlayers = parsed.filter(p => !existingNames.has(p.name.toLowerCase()));
+    const leftPlayers = data.members.filter(m => !pastedNames.has(m.name.toLowerCase()));
+    const stayPlayers = data.members.filter(m => pastedNames.has(m.name.toLowerCase()));
+
+    setSyncResult({ newPlayers, leftPlayers, stayPlayers, totalPasted: parsed.length });
+  };
+
+  const handleOCR = async (files) => {
+    if (!files || files.length === 0) return;
+    setOcrLoading(true);
+    setOcrProgress("Preparando OCR...");
+    let allText = "";
+
+    try {
+      for (let i = 0; i < files.length; i++) {
+        setOcrProgress(`Lendo imagem ${i + 1} de ${files.length}...`);
+        const result = await Tesseract.recognize(files[i], "por+eng", {
+          logger: (m) => {
+            if (m.status === "recognizing text") {
+              setOcrProgress(`Imagem ${i + 1}/${files.length}: ${Math.round((m.progress || 0) * 100)}%`);
+            }
+          }
+        });
+        allText += result.data.text + "\n";
+      }
+
+      // Parse OCR output: try to extract Name, Level, Class from game table
+      const lines = allText.split("\n").filter(l => l.trim());
+      const parsed = [];
+
+      for (const line of lines) {
+        // Skip header lines
+        if (/^nome|posição|título|nível|classe/i.test(line.trim())) continue;
+        
+        // Game table format: Name | Position | Title | Level | Class
+        // Try to extract using common patterns
+        const parts = line.split(/\s{2,}|\t+/).map(s => s.trim()).filter(Boolean);
+        
+        if (parts.length >= 3) {
+          const name = parts[0];
+          // Skip if name looks like garbage
+          if (name.length < 2 || /^[^a-zA-Z]/.test(name)) continue;
+          
+          // Find level (a number around 80-110)
+          let level = 100;
+          let className = "";
+          
+          for (const p of parts) {
+            const num = parseInt(p);
+            if (num >= 50 && num <= 120) { level = num; }
+          }
+          
+          // Last part is usually the class
+          const lastPart = parts[parts.length - 1];
+          const resolved = resolveClass(lastPart);
+          if (CLASSES.includes(resolved)) {
+            className = lastPart;
+          }
+          
+          parsed.push(`${name}, ${className || "?"}, ${level}`);
+        }
+      }
+
+      const result = parsed.join("\n");
+      setSyncText(result);
+      if (result.trim()) parseSync(result);
+      setOcrProgress("");
+    } catch (err) {
+      console.error("OCR error:", err);
+      setOcrProgress("Erro no OCR. Tente colar manualmente.");
+    }
+    setOcrLoading(false);
+  };
+
+  const applySync = (addNew, removeLeft) => {
+    if (!syncResult) return;
+    let newMembers = [...data.members];
+    let newEvents = [...(data.events || [])];
+    let newTwWeeks = [...(data.twWeeks || [])];
+
+    if (removeLeft && syncResult.leftPlayers.length > 0) {
+      const removeIds = new Set(syncResult.leftPlayers.map(m => m.id));
+      newMembers = newMembers.filter(m => !removeIds.has(m.id));
+      newEvents = newEvents.map(e => ({ ...e, present: (e.present || []).filter(id => !removeIds.has(id)) }));
+      newTwWeeks = newTwWeeks.map(w => ({
+        ...w,
+        confirmed: (w.confirmed || []).filter(id => !removeIds.has(id)),
+        declined: (w.declined || []).filter(id => !removeIds.has(id)),
+      }));
+    }
+
+    if (addNew && syncResult.newPlayers.length > 0) {
+      const additions = syncResult.newPlayers.map((p, i) => ({
+        name: p.name, class: p.class, level: p.level,
+        cultivo: CULTIVOS[0], whatsapp: "", id: Date.now() + i
+      }));
+      newMembers = [...newMembers, ...additions];
+    }
+
+    save({ ...data, members: newMembers, events: newEvents, twWeeks: newTwWeeks });
+    setSyncText(""); setSyncResult(null); setShowSync(false);
+  };
+
   const parseBulk = (text) => {
     const lines = text.split("\n").filter(l => l.trim());
     const parsed = lines.map(line => {
@@ -314,10 +436,129 @@ function MembersTab({ data, save }) {
         <span>Membros</span>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {data.members.length > 0 && <button className="btn btn-green" onClick={exportExcel}>{Ico.download} Excel</button>}
-          <button className="btn btn-blue" onClick={()=>{setShowBulk(!showBulk);setShow(false);}}>⚡ Importar em Massa</button>
-          <button className="btn" onClick={()=>{setEditId(null);setForm(blank);setShow(!show);setShowBulk(false);}}>{Ico.plus} Cadastrar</button>
+          <button className="btn" style={{borderColor:"rgba(201,168,76,.4)",color:"var(--gold-b)",background:"rgba(201,168,76,.08)"}} onClick={()=>{setShowSync(!showSync);setShow(false);setShowBulk(false);setSyncResult(null);setSyncText("");}}>🔄 Sincronizar Lista</button>
+          <button className="btn btn-blue" onClick={()=>{setShowBulk(!showBulk);setShow(false);setShowSync(false);}}>⚡ Importar em Massa</button>
+          <button className="btn" onClick={()=>{setEditId(null);setForm(blank);setShow(!show);setShowBulk(false);setShowSync(false);}}>{Ico.plus} Cadastrar</button>
         </div>
       </div>
+
+      {/* SYNC ROSTER */}
+      {showSync && (
+        <div className="form-box">
+          <div style={{marginBottom:8}}>
+            <label style={{fontFamily:"'Cinzel',serif",fontSize:".6rem",letterSpacing:2,textTransform:"uppercase",color:"var(--gold)"}}>Sincronizar com Lista Atual do Clã</label>
+            <div style={{fontSize:".78rem",color:"var(--text-d)",marginTop:2,marginBottom:8,lineHeight:1.6}}>
+              Cole a lista <strong style={{color:"var(--gold)"}}>completa e atual</strong> de membros do clã, ou <strong style={{color:"var(--gold)"}}>envie prints</strong> da tela de membros do jogo.
+              <br/>O sistema compara e mostra quem <span style={{color:"var(--green-l)"}}>entrou</span> e quem <span style={{color:"var(--red-l)"}}>saiu</span>.
+            </div>
+
+            {/* Image upload */}
+            <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center",flexWrap:"wrap"}}>
+              <label className="btn btn-blue" style={{cursor:"pointer",position:"relative"}}>
+                📷 Enviar Prints do Jogo
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={e => handleOCR(e.target.files)}
+                  style={{position:"absolute",opacity:0,width:0,height:0}}
+                  disabled={ocrLoading}
+                />
+              </label>
+              {ocrLoading && (
+                <span style={{fontSize:".8rem",color:"var(--gold)",fontStyle:"italic"}}>{ocrProgress}</span>
+              )}
+              <span style={{fontSize:".7rem",color:"var(--text-d)"}}>Aceita múltiplas imagens</span>
+            </div>
+
+            <div style={{fontSize:".7rem",color:"var(--text-d)",marginBottom:6}}>Ou cole manualmente (Nome, Classe, Nível):</div>
+            <textarea
+              value={syncText}
+              onChange={e => { setSyncText(e.target.value); if (e.target.value.trim()) parseSync(e.target.value); else setSyncResult(null); }}
+              placeholder={"Cole a lista completa do clã aqui:\nJogador1, WB, 101\nJogador2, PSY, 105\n..."}
+              style={{width:"100%",minHeight:140,resize:"vertical"}}
+            />
+          </div>
+
+          {syncResult && (
+            <div>
+              {/* Summary */}
+              <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:12,padding:"10px 14px",background:"var(--bg)",borderRadius:4}}>
+                <span className="att-s-item"><span className="att-s-num" style={{color:"var(--gold)"}}>{syncResult.totalPasted}</span>Na lista</span>
+                <span className="att-s-item"><span className="att-s-num" style={{color:"var(--text)"}}>{syncResult.stayPlayers.length}</span>Permanecem</span>
+                <span className="att-s-item"><span className="att-s-num" style={{color:"var(--green-l)"}}>{syncResult.newPlayers.length}</span>Novos</span>
+                <span className="att-s-item"><span className="att-s-num" style={{color:"var(--red-l)"}}>{syncResult.leftPlayers.length}</span>Saíram</span>
+              </div>
+
+              {/* New players */}
+              {syncResult.newPlayers.length > 0 && (
+                <div style={{marginBottom:12}}>
+                  <div style={{fontFamily:"'Cinzel',serif",fontSize:".6rem",letterSpacing:2,textTransform:"uppercase",color:"var(--green-l)",marginBottom:6,paddingBottom:4,borderBottom:"1px solid rgba(56,121,74,.3)"}}>
+                    Novos Membros ({syncResult.newPlayers.length})
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))",gap:4}}>
+                    {syncResult.newPlayers.map((p, i) => (
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 8px",background:"rgba(56,121,74,.08)",border:"1px solid rgba(56,121,74,.2)",borderRadius:3,fontSize:".82rem"}}>
+                        <span style={{color:"var(--green-l)",fontSize:".7rem",flexShrink:0}}>+</span>
+                        <span style={{fontWeight:600,flex:1}}>{p.name}</span>
+                        <span style={{fontSize:".6rem",color:cc(p.class),fontFamily:"'Cinzel',serif",letterSpacing:1}}>{p.class}</span>
+                        <span style={{fontSize:".75rem",color:"var(--text-d)"}}>{p.level}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Left players */}
+              {syncResult.leftPlayers.length > 0 && (
+                <div style={{marginBottom:12}}>
+                  <div style={{fontFamily:"'Cinzel',serif",fontSize:".6rem",letterSpacing:2,textTransform:"uppercase",color:"var(--red-l)",marginBottom:6,paddingBottom:4,borderBottom:"1px solid rgba(155,44,44,.3)"}}>
+                    Saíram do Clã ({syncResult.leftPlayers.length})
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))",gap:4}}>
+                    {syncResult.leftPlayers.map(m => (
+                      <div key={m.id} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 8px",background:"rgba(155,44,44,.06)",border:"1px solid rgba(155,44,44,.2)",borderRadius:3,fontSize:".82rem",opacity:.8}}>
+                        <span style={{color:"var(--red-l)",fontSize:".7rem",flexShrink:0}}>−</span>
+                        <span style={{fontWeight:600,flex:1}}>{m.name}</span>
+                        <span style={{fontSize:".6rem",color:cc(m.class),fontFamily:"'Cinzel',serif",letterSpacing:1}}>{m.class}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {syncResult.newPlayers.length === 0 && syncResult.leftPlayers.length === 0 && (
+                <div style={{padding:16,textAlign:"center",color:"var(--green-l)",fontSize:".85rem"}}>
+                  ✓ A lista está sincronizada! Nenhuma mudança detectada.
+                </div>
+              )}
+
+              {/* Action buttons */}
+              {(syncResult.newPlayers.length > 0 || syncResult.leftPlayers.length > 0) && (
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
+                  <button className="btn btn-green" onClick={() => applySync(true, true)}>
+                    {Ico.check} Aplicar Tudo ({syncResult.newPlayers.length > 0 ? `+${syncResult.newPlayers.length}` : ""}{syncResult.newPlayers.length > 0 && syncResult.leftPlayers.length > 0 ? " / " : ""}{syncResult.leftPlayers.length > 0 ? `-${syncResult.leftPlayers.length}` : ""})
+                  </button>
+                  {syncResult.newPlayers.length > 0 && syncResult.leftPlayers.length > 0 && (
+                    <>
+                      <button className="btn" style={{borderColor:"rgba(56,121,74,.4)",color:"var(--green-l)"}} onClick={() => applySync(true, false)}>
+                        Só adicionar novos (+{syncResult.newPlayers.length})
+                      </button>
+                      <button className="btn btn-d" onClick={() => applySync(false, true)}>
+                        Só remover quem saiu (−{syncResult.leftPlayers.length})
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={{display:"flex",gap:8,marginTop:10}}>
+            <button className="btn btn-d" onClick={() => { setShowSync(false); setSyncText(""); setSyncResult(null); }}>Cancelar</button>
+          </div>
+        </div>
+      )}
 
       {showBulk && (
         <div className="form-box">
