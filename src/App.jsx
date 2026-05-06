@@ -291,6 +291,7 @@ function MembersTab({ data, save }) {
         confirmed: (w.confirmed || []).filter(id => !removeIds.has(id)),
         declined: (w.declined || []).filter(id => !removeIds.has(id)),
       })),
+      lentAccounts: (data.lentAccounts || []).filter(a => !removeIds.has(a.memberId)),
     });
     setSelected(new Set());
     setSelectMode(false);
@@ -382,8 +383,30 @@ function MembersTab({ data, save }) {
       members:data.members.filter(m=>m.id!==id),
       events:(data.events||[]).map(e=>({...e,present:(e.present||[]).filter(p=>p!==id)})),
       twWeeks:(data.twWeeks||[]).map(w=>({...w,confirmed:(w.confirmed||[]).filter(p=>p!==id),declined:(w.declined||[]).filter(p=>p!==id)})),
+      lentAccounts:(data.lentAccounts||[]).filter(a=>a.memberId!==id),
     });
   };
+
+  const sendToLend = (m) => {
+    // Check if already in lentAccounts
+    const already = (data.lentAccounts||[]).some(a => a.memberId === m.id);
+    if (already) return;
+    const newAccount = {
+      id: Date.now(),
+      memberId: m.id,
+      charName: m.name,
+      class: m.class,
+      borrower: "",
+      login: "",
+      senha: "",
+      since: new Date().toISOString().split("T")[0],
+      notes: "",
+      status: "disponivel", // disponivel or emprestado
+    };
+    save({ ...data, lentAccounts: [...(data.lentAccounts||[]), newAccount] });
+  };
+
+  const isLent = (id) => (data.lentAccounts||[]).some(a => a.memberId === id);
   const cancel = () => { setForm(blank); setEditId(null); setShow(false); };
 
   const exportExcel = () => {
@@ -652,6 +675,10 @@ function MembersTab({ data, save }) {
                       <td style={{fontSize:".82rem",color:m.obs?"var(--gold)":"var(--text-d)",fontWeight:m.obs?600:400}}>{m.obs||"—"}</td>
                       {!selectMode && <td style={{whiteSpace:"nowrap"}}>
                         <button className="btn btn-s" onClick={()=>startEdit(m)} style={{marginRight:4}}>{Ico.edit}</button>
+                        {!isLent(m.id)
+                          ? <button className="btn btn-s" style={{marginRight:4,borderColor:"rgba(201,168,76,.4)",color:"var(--gold)",background:"rgba(201,168,76,.08)",fontSize:".5rem"}} onClick={()=>sendToLend(m)} title="Disponibilizar para 0800">{Ico.key}</button>
+                          : <span className="badge b-gold" style={{fontSize:".45rem",marginRight:4,verticalAlign:"middle"}}>0800</span>
+                        }
                         <button className="btn btn-s btn-d" onClick={()=>remove(m.id)}>{Ico.trash}</button>
                       </td>}
                     </>
@@ -1475,61 +1502,112 @@ function PTBuilderTab({ data, save }) {
 
 /* ═══════════════ ACCOUNTS ═══════════════ */
 function AccountsTab({ data, save }) {
-  const [show, setShow] = useState(false);
   const [reveals, setReveals] = useState({});
-  const blank = {charName:"",class:CLASSES[0],borrower:"",since:"",notes:"",login:"",senha:""};
-  const [form, setForm] = useState(blank);
-  const submit = () => {
-    if(!form.charName.trim()||!form.borrower.trim()) return;
-    save({...data,lentAccounts:[...(data.lentAccounts||[]),{...form,id:Date.now(),since:form.since||new Date().toISOString().split("T")[0]}]});
-    setForm(blank); setShow(false);
+  const [editId, setEditId] = useState(null);
+  const [form, setForm] = useState({borrower:"",login:"",senha:"",notes:""});
+
+  const accounts = data.lentAccounts || [];
+  const disponivel = accounts.filter(a => a.status === "disponivel" || !a.borrower);
+  const emprestado = accounts.filter(a => a.status === "emprestado" && a.borrower);
+
+  const remove = (id) => save({...data, lentAccounts: accounts.filter(a => a.id !== id)});
+  const toggleReveal = (id) => setReveals(r => ({...r, [id]: !r[id]}));
+
+  const startEdit = (a) => {
+    setForm({ borrower: a.borrower||"", login: a.login||"", senha: a.senha||"", notes: a.notes||"" });
+    setEditId(a.id);
   };
-  const remove = (id) => save({...data,lentAccounts:(data.lentAccounts||[]).filter(a=>a.id!==id)});
-  const toggleReveal = (id) => setReveals(r=>({...r,[id]:!r[id]}));
+
+  const saveEdit = () => {
+    save({...data, lentAccounts: accounts.map(a => {
+      if (a.id !== editId) return a;
+      return {
+        ...a,
+        ...form,
+        status: form.borrower.trim() ? "emprestado" : "disponivel",
+        since: form.borrower.trim() && !a.borrower ? new Date().toISOString().split("T")[0] : a.since,
+      };
+    })});
+    setEditId(null);
+  };
+
+  const devolver = (id) => {
+    save({...data, lentAccounts: accounts.map(a => {
+      if (a.id !== id) return a;
+      return { ...a, borrower: "", status: "disponivel" };
+    })});
+  };
+
+  const renderRow = (a) => {
+    const isEditing = editId === a.id;
+    return (
+      <tr key={a.id} style={isEditing ? {background:"rgba(201,168,76,.05)"} : {}}>
+        <td style={{fontWeight:600}}>{a.charName}</td>
+        <td><span className="badge" style={{background:cc(a.class)+"22",color:cc(a.class),border:`1px solid ${cc(a.class)}55`}}>{a.class}</span></td>
+        {isEditing ? (
+          <>
+            <td><input value={form.borrower} onChange={e=>setForm({...form,borrower:e.target.value})} placeholder="Quem vai usar" style={{width:"100%",padding:"4px 6px",fontSize:".82rem"}}/></td>
+            <td><input value={form.login} onChange={e=>setForm({...form,login:e.target.value})} placeholder="Login" style={{width:"100%",padding:"4px 6px",fontSize:".82rem"}}/></td>
+            <td><input value={form.senha} onChange={e=>setForm({...form,senha:e.target.value})} placeholder="Senha" style={{width:"100%",padding:"4px 6px",fontSize:".82rem"}}/></td>
+            <td><input value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} placeholder="Obs" style={{width:"100%",padding:"4px 6px",fontSize:".82rem"}}/></td>
+            <td style={{whiteSpace:"nowrap"}}>
+              <button className="btn btn-s btn-green" onClick={saveEdit} style={{marginRight:4}}>{Ico.check}</button>
+              <button className="btn btn-s btn-d" onClick={()=>setEditId(null)}>✗</button>
+            </td>
+          </>
+        ) : (
+          <>
+            <td style={{color: a.borrower ? "var(--text)" : "var(--text-d)", fontStyle: a.borrower ? "normal" : "italic"}}>
+              {a.borrower || "—"}
+            </td>
+            <td style={{fontSize:".85rem",fontFamily:"monospace",color:"var(--text-d)"}}>{a.login||"—"}</td>
+            <td>{a.senha ? (
+              <div className="pw-wrap">
+                {reveals[a.id] ? <span style={{fontFamily:"monospace",fontSize:".85rem"}}>{a.senha}</span> : <span className="pw-mask">••••••</span>}
+                <button className="pw-toggle" onClick={()=>toggleReveal(a.id)}>{reveals[a.id]?Ico.eyeOff:Ico.eye}</button>
+              </div>
+            ) : "—"}</td>
+            <td style={{color:"var(--text-d)",fontStyle:"italic",fontSize:".85rem"}}>{a.notes||"—"}</td>
+            <td style={{whiteSpace:"nowrap"}}>
+              <button className="btn btn-s" onClick={()=>startEdit(a)} style={{marginRight:4}}>{Ico.edit}</button>
+              {a.borrower && <button className="btn btn-s btn-green" onClick={()=>devolver(a.id)} style={{marginRight:4}}>Devolver</button>}
+              <button className="btn btn-s btn-d" onClick={()=>remove(a.id)}>{Ico.trash}</button>
+            </td>
+          </>
+        )}
+      </tr>
+    );
+  };
 
   return (
-    <div className="card">
-      <div className="card-t">
-        <span>Contas Emprestadas</span>
-        <button className="btn" onClick={()=>setShow(!show)}>{Ico.plus} Registrar</button>
-      </div>
-      {show&&(
-        <div className="form-box">
-          <div className="fr">
-            <div className="fg"><label>Nome do Char</label><input value={form.charName} onChange={e=>setForm({...form,charName:e.target.value})} placeholder="Personagem"/></div>
-            <div className="fg"><label>Classe</label><select value={form.class} onChange={e=>setForm({...form,class:e.target.value})}>{CLASSES.map(c=><option key={c}>{c}</option>)}</select></div>
-            <div className="fg"><label>Emprestado Para</label><input value={form.borrower} onChange={e=>setForm({...form,borrower:e.target.value})} placeholder="Quem vai usar"/></div>
-          </div>
-          <div className="fr">
-            <div className="fg"><label>Login da Conta</label><input value={form.login} onChange={e=>setForm({...form,login:e.target.value})} placeholder="E-mail ou login"/></div>
-            <div className="fg"><label>Senha da Conta</label><input value={form.senha} onChange={e=>setForm({...form,senha:e.target.value})} placeholder="Senha" type="password"/></div>
-          </div>
-          <div className="fr">
-            <div className="fg"><label>Desde</label><input type="date" value={form.since} onChange={e=>setForm({...form,since:e.target.value})}/></div>
-            <div className="fg" style={{flex:2}}><label>Observação</label><input value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} placeholder="Motivo"/></div>
-          </div>
-          <button className="btn" onClick={submit}>{Ico.check} Registrar</button>
+    <div>
+      {/* DISPONÍVEIS */}
+      <div className="card" style={{marginBottom:14}}>
+        <div className="card-t">
+          <span>Disponíveis para 0800 ({disponivel.length})</span>
         </div>
-      )}
-      {(data.lentAccounts||[]).length===0?<div className="empty">Nenhuma conta emprestada no momento.</div>
-        :<div className="tbl"><table>
-          <thead><tr><th>Char</th><th>Classe</th><th>Usando</th><th>Login</th><th>Senha</th><th>Desde</th><th>Obs</th><th></th></tr></thead>
-          <tbody>
-            {(data.lentAccounts||[]).map(a=>(
-              <tr key={a.id}>
-                <td style={{fontWeight:600}}>{a.charName}</td>
-                <td><span className="badge" style={{background:cc(a.class)+"22",color:cc(a.class),border:`1px solid ${cc(a.class)}55`}}>{a.class}</span></td>
-                <td>{a.borrower}</td>
-                <td style={{fontSize:".85rem",fontFamily:"monospace",color:"var(--text-d)"}}>{a.login||"—"}</td>
-                <td>{a.senha?(<div className="pw-wrap">{reveals[a.id]?<span style={{fontFamily:"monospace",fontSize:".85rem"}}>{a.senha}</span>:<span className="pw-mask">••••••</span>}<button className="pw-toggle" onClick={()=>toggleReveal(a.id)}>{reveals[a.id]?Ico.eyeOff:Ico.eye}</button></div>):"—"}</td>
-                <td style={{color:"var(--text-d)",fontSize:".85rem"}}>{a.since}</td>
-                <td style={{color:"var(--text-d)",fontStyle:"italic",fontSize:".85rem"}}>{a.notes||"—"}</td>
-                <td><button className="btn btn-s btn-d" onClick={()=>remove(a.id)}>Devolver</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table></div>
-      }
+        {disponivel.length === 0
+          ? <div className="empty">Nenhuma conta disponível. Use o botão 🔑 na aba Membros para disponibilizar.</div>
+          : <div className="tbl"><table>
+            <thead><tr><th>Char</th><th>Classe</th><th>Usando</th><th>Login</th><th>Senha</th><th>Obs</th><th></th></tr></thead>
+            <tbody>{disponivel.map(renderRow)}</tbody>
+          </table></div>
+        }
+      </div>
+
+      {/* EMPRESTADAS */}
+      <div className="card">
+        <div className="card-t">
+          <span>Emprestadas ({emprestado.length})</span>
+        </div>
+        {emprestado.length === 0
+          ? <div className="empty">Nenhuma conta emprestada no momento.</div>
+          : <div className="tbl"><table>
+            <thead><tr><th>Char</th><th>Classe</th><th>Usando</th><th>Login</th><th>Senha</th><th>Obs</th><th></th></tr></thead>
+            <tbody>{emprestado.map(renderRow)}</tbody>
+          </table></div>
+        }
+      </div>
     </div>
   );
 }
