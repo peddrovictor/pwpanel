@@ -71,7 +71,7 @@ function cc(cls) { return CLASS_COLORS[cls] || "#7A7060"; }
 
 
 /* ═══════════════ LOGIN ═══════════════ */
-function LoginScreen({ onLogin }) {
+function LoginScreen({ onLogin, onPlayerView }) {
   const [mode, setMode] = useState("loading");
   const [user, setUser] = useState("");
   const [pass, setPass] = useState("");
@@ -138,6 +138,14 @@ function LoginScreen({ onLogin }) {
             <button className="lbtn" onClick={handleRegister}>Criar Conta Admin</button>
           </>
         )}
+        {mode === "login" && (
+          <div style={{marginTop:16,paddingTop:16,borderTop:"1px solid var(--border-g)"}}>
+            <div style={{fontSize:".75rem",color:"var(--text-d)",marginBottom:8}}>Não é staff?</div>
+            <button className="lbtn" onClick={onPlayerView} style={{background:"rgba(58,90,122,.1)",borderColor:"rgba(58,90,122,.3)",color:"#6A9FBF"}}>
+              Sou Membro do Clã
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -146,22 +154,23 @@ function LoginScreen({ onLogin }) {
 /* ═══════════════ MAIN APP ═══════════════ */
 export default function App() {
   const [auth, setAuth] = useState(null);
+  const [playerView, setPlayerView] = useState(false);
   const [data, setData] = useState(null);
   const [tab, setTab] = useState("members");
   const [loading, setLoading] = useState(true);
 
+  const isActive = auth || playerView;
+
   useEffect(() => {
-    if (!auth) return;
+    if (!isActive) return;
     const timeout = setTimeout(() => { setData(DEFAULT_DATA); setLoading(false); }, 4000);
 
-    // Real-time sync: listen for changes
     const unsubscribe = storage.subscribe(DATA_KEY, (val) => {
       setData(sanitize(val));
       setLoading(false);
       clearTimeout(timeout);
     });
 
-    // Also do an initial fetch
     (async () => {
       try {
         const s = await storage.get(DATA_KEY);
@@ -173,20 +182,22 @@ export default function App() {
     })();
 
     return () => { clearTimeout(timeout); unsubscribe(); };
-  }, [auth]);
+  }, [isActive]);
 
   const save = useCallback(async (d) => {
     setData(d);
     await storage.save(DATA_KEY, d);
   }, []);
 
-  if (!auth) return <LoginScreen onLogin={setAuth} />;
+  if (!isActive) return <LoginScreen onLogin={setAuth} onPlayerView={()=>setPlayerView(true)} />;
 
   if (loading || !data) return (
     <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"var(--bg)",color:"var(--gold)",fontFamily:"'Cinzel',serif",letterSpacing:4,fontSize:".9rem"}}>
       Carregando...
     </div>
   );
+
+  if (playerView) return <PlayerView data={data} onBack={()=>{setPlayerView(false);setData(null);setLoading(true);}} />;
 
   const tabs = [
     { id:"members", label:"Membros", icon:Ico.users },
@@ -1496,6 +1507,219 @@ function PTBuilderTab({ data, save }) {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/* ═══════════════ PLAYER VIEW (READ-ONLY) ═══════════════ */
+function PlayerView({ data, onBack }) {
+  const [search, setSearch] = useState("");
+  const [viewTab, setViewTab] = useState("ranking");
+
+  const totalEvents = (data.events || []).length;
+  const classCounts = CLASSES.reduce((a, c) => { a[c] = data.members.filter(m => m.class === c).length; return a; }, {});
+
+  const ranking = data.members.map(m => {
+    const attended = (data.events || []).filter(e => (e.present || []).includes(m.id)).length;
+    return { ...m, attended, pct: totalEvents > 0 ? Math.round(attended / totalEvents * 100) : 0 };
+  }).sort((a, b) => b.attended - a.attended);
+
+  const getTypeCount = (m, type) => (data.events || []).filter(e => e.type === type && (e.present || []).includes(m.id)).length;
+  const getTypeTotal = (type) => (data.events || []).filter(e => e.type === type).length;
+
+  const filtered = search
+    ? ranking.filter(m => m.name.toLowerCase().includes(search.toLowerCase()))
+    : ranking;
+
+  const weeks = data.twWeeks || [];
+
+  const tabs = [
+    { id: "ranking", label: "Ranking" },
+    { id: "membros", label: "Membros" },
+    { id: "tw", label: "TW" },
+  ];
+
+  return (
+    <div className="app">
+      <header className="hdr">
+        <h1>ROMA</h1>
+        <div className="sub">Perfect World — Painel do Clã</div>
+        <div className="hdr-row">
+          <span className="hdr-stat">{data.members.length} membros</span>
+          <button className="logout-btn" onClick={onBack}>← Voltar</button>
+        </div>
+      </header>
+
+      {/* Class summary */}
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ fontFamily: "'Cinzel',serif", fontSize: ".7rem", letterSpacing: 2, textTransform: "uppercase", color: "var(--gold)", marginRight: 8 }}>
+            <span style={{ fontSize: "1.2rem", fontWeight: 700, marginRight: 4 }}>{data.members.length}</span>membros
+          </div>
+          <div style={{ width: 1, height: 24, background: "var(--border-g)" }} />
+          {CLASSES.map(c => classCounts[c] > 0 && (
+            <div key={c} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 2, background: cc(c), display: "inline-block" }} />
+              <span style={{ fontFamily: "'Cinzel',serif", fontSize: ".7rem", fontWeight: 700, color: cc(c), letterSpacing: 1 }}>{c}</span>
+              <span style={{ fontSize: ".8rem", fontWeight: 600, color: "var(--text)" }}>{classCounts[c]}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <nav className="tabs">
+        {tabs.map(t => (
+          <button key={t.id} className={`tab ${viewTab === t.id ? "on" : ""}`} onClick={() => setViewTab(t.id)}>
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      {/* RANKING TAB */}
+      {viewTab === "ranking" && (
+        <div className="card">
+          <div className="card-t">
+            <span style={{ display: "flex", alignItems: "center", gap: 8 }}>{Ico.trophy} Ranking de Presença</span>
+            <span className="badge b-gold">{totalEvents} eventos</span>
+          </div>
+
+          {totalEvents === 0 ? (
+            <div className="empty">Nenhum evento registrado ainda.</div>
+          ) : (
+            <>
+              <div style={{ marginBottom: 10 }}>
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nome..."
+                  style={{ width: "100%", maxWidth: 300, padding: "7px 10px", fontSize: ".85rem" }} />
+              </div>
+              <div className="tbl"><table>
+                <thead><tr><th>#</th><th>Nome</th><th>Classe</th><th>TW</th><th>W.Boss</th><th>Marcial</th><th>Total</th><th>%</th></tr></thead>
+                <tbody>
+                  {filtered.map((m, i) => {
+                    const realIdx = ranking.indexOf(m);
+                    const twC = getTypeCount(m, "TW"), wbC = getTypeCount(m, "World Boss"), mcC = getTypeCount(m, "Marcial");
+                    const twT = getTypeTotal("TW"), wbT = getTypeTotal("World Boss"), mcT = getTypeTotal("Marcial");
+                    const medalColor = realIdx === 0 ? "#FFD700" : realIdx === 1 ? "#C0C0C0" : realIdx === 2 ? "#CD7F32" : null;
+                    return (
+                      <tr key={m.id}>
+                        <td style={{ fontFamily: "'Cinzel',serif", fontWeight: 700, color: medalColor || "var(--text-d)", fontSize: medalColor ? ".95rem" : ".8rem" }}>
+                          {realIdx < 3 ? ["🥇", "🥈", "🥉"][realIdx] : realIdx + 1}
+                        </td>
+                        <td style={{ fontWeight: 600 }}>{m.name}</td>
+                        <td><span className="badge" style={{ background: cc(m.class) + "22", color: cc(m.class), border: `1px solid ${cc(m.class)}55` }}>{m.class}</span></td>
+                        <td style={{ fontSize: ".8rem" }}>{twT > 0 ? <span style={{ color: twC > 0 ? "var(--text)" : "var(--text-d)" }}>{twC}/{twT}</span> : "—"}</td>
+                        <td style={{ fontSize: ".8rem" }}>{wbT > 0 ? <span style={{ color: wbC > 0 ? "var(--text)" : "var(--text-d)" }}>{wbC}/{wbT}</span> : "—"}</td>
+                        <td style={{ fontSize: ".8rem" }}>{mcT > 0 ? <span style={{ color: mcC > 0 ? "var(--text)" : "var(--text-d)" }}>{mcC}/{mcT}</span> : "—"}</td>
+                        <td style={{ fontWeight: 600 }}>{m.attended}/{totalEvents}</td>
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <div style={{ width: 50, height: 6, background: "var(--border)", borderRadius: 3, overflow: "hidden" }}>
+                              <div style={{ width: m.pct + "%", height: "100%", background: m.pct >= 75 ? "var(--green-l)" : m.pct >= 50 ? "var(--gold)" : "var(--red-l)", borderRadius: 3 }} />
+                            </div>
+                            <span style={{ fontSize: ".75rem", color: m.pct >= 75 ? "var(--green-l)" : m.pct >= 50 ? "var(--gold)" : "var(--red-l)", fontWeight: 600 }}>{m.pct}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table></div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* MEMBROS TAB */}
+      {viewTab === "membros" && (
+        <div className="card">
+          <div className="card-t"><span>Membros do Clã</span></div>
+          <div style={{ marginBottom: 10 }}>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nome..."
+              style={{ width: "100%", maxWidth: 300, padding: "7px 10px", fontSize: ".85rem" }} />
+          </div>
+          <div className="tbl"><table>
+            <thead><tr><th>Nome</th><th>Classe</th><th>Nível</th><th>Cultivo</th><th>Obs</th></tr></thead>
+            <tbody>
+              {(search ? data.members.filter(m => m.name.toLowerCase().includes(search.toLowerCase())) : data.members)
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(m => (
+                  <tr key={m.id}>
+                    <td style={{ fontWeight: 600 }}>{m.name}</td>
+                    <td><span className="badge" style={{ background: cc(m.class) + "22", color: cc(m.class), border: `1px solid ${cc(m.class)}55` }}>{m.class}</span></td>
+                    <td>{m.level}</td>
+                    <td><span className="badge b-gold">{m.cultivo}</span></td>
+                    <td style={{ fontSize: ".82rem", color: m.obs ? "var(--gold)" : "var(--text-d)", fontWeight: m.obs ? 600 : 400 }}>{m.obs || "—"}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table></div>
+        </div>
+      )}
+
+      {/* TW TAB */}
+      {viewTab === "tw" && (
+        <div className="card">
+          <div className="card-t"><span>Controle de TW</span></div>
+          {weeks.length === 0 ? <div className="empty">Nenhuma TW registrada.</div>
+            : weeks.map(week => {
+              const conf = week.confirmed || [];
+              const decl = week.declined || [];
+              const confM = data.members.filter(m => conf.includes(m.id));
+              const declM = data.members.filter(m => decl.includes(m.id));
+              const confClassCounts = CLASSES.reduce((a, c) => { a[c] = confM.filter(m => m.class === c).length; return a; }, {});
+              return (
+                <div key={week.id} style={{ marginBottom: 12, background: "var(--bg-i)", border: "1px solid var(--border)", borderRadius: 4, padding: 14 }}>
+                  <div style={{ fontFamily: "'Cinzel',serif", fontWeight: 700, fontSize: ".85rem", color: "var(--gold)", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                    <span>{week.label}</span>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <span className="badge b-green">{conf.length} vão</span>
+                      <span className="badge b-red">{decl.length} não vão</span>
+                    </div>
+                  </div>
+                  {confM.length > 0 && (
+                    <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+                      {CLASSES.map(c => confClassCounts[c] > 0 && (
+                        <span key={c} style={{ fontSize: ".6rem", padding: "2px 6px", borderRadius: 2, background: cc(c) + "18", color: cc(c), border: `1px solid ${cc(c)}40`, fontFamily: "'Cinzel',serif", letterSpacing: 1, fontWeight: 600 }}>
+                          {confClassCounts[c]}x {c}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="tw-cols">
+                    <div>
+                      <div className="tw-col-h go">Confirmados ({confM.length})</div>
+                      {confM.length === 0 ? <div style={{ fontSize: ".8rem", color: "var(--text-d)", fontStyle: "italic", padding: "4px 8px" }}>—</div>
+                        : confM.sort((a, b) => a.class.localeCompare(b.class)).map(m => (
+                          <div key={m.id} className="tw-player go">
+                            <span style={{ color: "var(--green-l)", marginRight: 4 }}>●</span>
+                            <span style={{ fontWeight: 600, flex: 1 }}>{m.name}</span>
+                            <span style={{ fontSize: ".7rem", color: cc(m.class), fontFamily: "'Cinzel',serif" }}>{m.class}</span>
+                          </div>
+                        ))}
+                    </div>
+                    <div>
+                      <div className="tw-col-h no">Não Participam ({declM.length})</div>
+                      {declM.length === 0 ? <div style={{ fontSize: ".8rem", color: "var(--text-d)", fontStyle: "italic", padding: "4px 8px" }}>—</div>
+                        : declM.map(m => (
+                          <div key={m.id} className="tw-player no">
+                            <span style={{ color: "var(--red-l)", marginRight: 4 }}>●</span>
+                            <span style={{ flex: 1 }}>{m.name}</span>
+                            <span style={{ fontSize: ".7rem" }}>{m.class}</span>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          }
+        </div>
+      )}
+
+      {/* Footer */}
+      <div style={{ textAlign: "center", padding: "20px 0", fontSize: ".75rem", color: "var(--text-d)" }}>
+        Dúvidas? Fale com um membro da staff.
+      </div>
     </div>
   );
 }
