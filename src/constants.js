@@ -36,6 +36,8 @@ export const DEFAULT_DATA = {
   twWeeks: [],
   lentAccounts: [],
   twPTs: {},
+  logs: [],
+  insignias: { queue: [], delivered: [] },
 };
 
 export function resolveClass(raw) {
