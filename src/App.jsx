@@ -63,7 +63,14 @@ function sanitize(d) {
       players: toArr(pt.players),
     }));
   });
-  return { members, events, twWeeks, lentAccounts, twPTs };
+  return {
+    members, events, twWeeks, lentAccounts, twPTs,
+    logs: toArr(d.logs || []),
+    insignias: {
+      queue: toArr(d.insignias?.queue || []),
+      delivered: toArr(d.insignias?.delivered || []),
+    },
+  };
 }
 
 // Safe class color (fallback for unknown classes)
@@ -184,10 +191,17 @@ export default function App() {
     return () => { clearTimeout(timeout); unsubscribe(); };
   }, [isActive]);
 
-  const save = useCallback(async (d) => {
-    setData(d);
-    await storage.save(DATA_KEY, d);
-  }, []);
+  const save = useCallback(async (d, logMsg) => {
+    let updated = d;
+    if (logMsg && auth) {
+      const logs = toArr(d.logs || []);
+      const entry = { ts: new Date().toISOString(), user: auth.user, action: logMsg };
+      // Keep last 200 logs
+      updated = { ...d, logs: [entry, ...logs].slice(0, 200) };
+    }
+    setData(updated);
+    await storage.save(DATA_KEY, updated);
+  }, [auth]);
 
   if (!isActive) return <LoginScreen onLogin={setAuth} onPlayerView={()=>setPlayerView(true)} />;
 
@@ -205,6 +219,8 @@ export default function App() {
     { id:"tw", label:"Controle TW", icon:Ico.shield },
     { id:"pts", label:"Montar PTs", icon:Ico.swords },
     { id:"accounts", label:"Contas", icon:Ico.key },
+    { id:"insignias", label:"Insígnias", icon:Ico.medal },
+    ...(auth.isAdmin ? [{ id:"logs", label:"Logs", icon:Ico.clock }] : []),
     ...(auth.isAdmin ? [{ id:"staff", label:"Staff", icon:Ico.edit }] : []),
   ];
 
@@ -233,6 +249,8 @@ export default function App() {
       {tab==="tw" && <TWTab data={data} save={save}/>}
       {tab==="pts" && <PTBuilderTab data={data} save={save}/>}
       {tab==="accounts" && <AccountsTab data={data} save={save}/>}
+      {tab==="insignias" && <InsigniasTab data={data} save={save}/>}
+      {tab==="logs" && auth.isAdmin && <LogsTab data={data} save={save}/>}
       {tab==="staff" && auth.isAdmin && <StaffTab/>}
     </div>
   );
@@ -303,7 +321,7 @@ function MembersTab({ data, save }) {
         declined: (w.declined || []).filter(id => !removeIds.has(id)),
       })),
       lentAccounts: (data.lentAccounts || []).filter(a => !removeIds.has(a.memberId)),
-    });
+    }, `Removeu ${removeIds.size} membros em massa`);
     setSelected(new Set());
     setSelectMode(false);
   };
@@ -352,7 +370,8 @@ function MembersTab({ data, save }) {
       newMembers = [...newMembers, ...additions];
     }
 
-    save({ ...data, members: newMembers, events: newEvents, twWeeks: newTwWeeks });
+    save({ ...data, members: newMembers, events: newEvents, twWeeks: newTwWeeks },
+      `Sincronizou lista${addNew && syncResult.newPlayers.length > 0 ? ` (+${syncResult.newPlayers.length} novos)` : ""}${removeLeft && syncResult.leftPlayers.length > 0 ? ` (-${syncResult.leftPlayers.length} removidos)` : ""}`);
     setSyncText(""); setSyncResult(null); setShowSync(false);
   };
 
@@ -372,34 +391,34 @@ function MembersTab({ data, save }) {
     const newMembers = bulkPreview
       .filter(m => !existing.has(m.name.toLowerCase()))
       .map((m, i) => ({ name:m.name, class:m.class, level:m.level, cultivo:m.cultivo, whatsapp:m.whatsapp, id:Date.now()+i }));
-    save({ ...data, members: [...data.members, ...newMembers] });
+    save({ ...data, members: [...data.members, ...newMembers] }, `Importou ${newMembers.length} membros em massa`);
     setBulkText(""); setBulkPreview([]); setShowBulk(false);
   };
 
   const submit = () => {
     if (!form.name.trim()) return;
     if (editId) {
-      save({...data,members:data.members.map(m=>m.id===editId?{...m,...form}:m)});
+      save({...data,members:data.members.map(m=>m.id===editId?{...m,...form}:m)}, `Editou membro "${form.name}"`);
       setEditId(null);
     } else {
-      save({...data,members:[...data.members,{...form,id:Date.now()}]});
+      save({...data,members:[...data.members,{...form,id:Date.now()}]}, `Cadastrou membro "${form.name}" (${form.class})`);
     }
     setForm(blank); setShow(false);
   };
 
   const startEdit = (m) => { setForm({name:m.name,class:m.class,level:m.level,cultivo:m.cultivo,whatsapp:m.whatsapp,obs:m.obs||""}); setEditId(m.id); setShow(false); };
   const remove = (id) => {
+    const m = data.members.find(x => x.id === id);
     save({
       ...data,
       members:data.members.filter(m=>m.id!==id),
       events:(data.events||[]).map(e=>({...e,present:(e.present||[]).filter(p=>p!==id)})),
       twWeeks:(data.twWeeks||[]).map(w=>({...w,confirmed:(w.confirmed||[]).filter(p=>p!==id),declined:(w.declined||[]).filter(p=>p!==id)})),
       lentAccounts:(data.lentAccounts||[]).filter(a=>a.memberId!==id),
-    });
+    }, `Removeu membro "${m?.name||id}"`);
   };
 
   const sendToLend = (m) => {
-    // Check if already in lentAccounts
     const already = (data.lentAccounts||[]).some(a => a.memberId === m.id);
     if (already) return;
     const newAccount = {
@@ -412,9 +431,9 @@ function MembersTab({ data, save }) {
       senha: "",
       since: new Date().toISOString().split("T")[0],
       notes: "",
-      status: "disponivel", // disponivel or emprestado
+      status: "disponivel",
     };
-    save({ ...data, lentAccounts: [...(data.lentAccounts||[]), newAccount] });
+    save({ ...data, lentAccounts: [...(data.lentAccounts||[]), newAccount] }, `Disponibilizou "${m.name}" para 0800`);
   };
 
   const isLent = (id) => (data.lentAccounts||[]).some(a => a.memberId === id);
@@ -912,8 +931,8 @@ function EventsTab({ data, save }) {
   const [showRanking, setShowRanking] = useState(true);
   const blank = {name:"",type:EVENT_TYPES[0],date:"",present:[]};
   const [form, setForm] = useState(blank);
-  const submit = () => { if(!form.name.trim()||!form.date) return; save({...data,events:[...data.events,{...form,id:Date.now()}]}); setForm(blank); setShow(false); };
-  const removeEv = (id) => save({...data,events:data.events.filter(e=>e.id!==id)});
+  const submit = () => { if(!form.name.trim()||!form.date) return; save({...data,events:[...data.events,{...form,id:Date.now()}]}, `Criou evento "${form.name}" (${form.type})`); setForm(blank); setShow(false); };
+  const removeEv = (id) => { const ev = data.events.find(e=>e.id===id); save({...data,events:data.events.filter(e=>e.id!==id)}, `Removeu evento "${ev?.name||id}"`); };
   const togglePresent = (evId,mId) => {
     save({...data,events:data.events.map(e=>{ if(e.id!==evId) return e; const p=e.present||[]; return {...e,present:p.includes(mId)?p.filter(x=>x!==mId):[...p,mId]}; })});
   };
@@ -1051,8 +1070,8 @@ function TWTab({ data, save }) {
   const [weekLabel, setWeekLabel] = useState("");
   const [sortCol, setSortCol] = useState("name"); // name, class
   const [sortDir, setSortDir] = useState("asc");
-  const createWeek = () => { if(!weekLabel.trim()) return; save({...data,twWeeks:[{id:Date.now(),label:weekLabel,confirmed:[],declined:[]},...(data.twWeeks||[])]}); setWeekLabel(""); setShow(false); };
-  const removeWeek = (id) => save({...data,twWeeks:(data.twWeeks||[]).filter(w=>w.id!==id)});
+  const createWeek = () => { if(!weekLabel.trim()) return; save({...data,twWeeks:[{id:Date.now(),label:weekLabel,confirmed:[],declined:[]},...(data.twWeeks||[])]}, `Criou semana TW "${weekLabel}"`); setWeekLabel(""); setShow(false); };
+  const removeWeek = (id) => { const w = (data.twWeeks||[]).find(x=>x.id===id); save({...data,twWeeks:(data.twWeeks||[]).filter(w=>w.id!==id)}, `Removeu semana TW "${w?.label||id}"`); };
   const toggleExpand = (id) => setExpanded(e=>({...e,[id]:!e[id]}));
   const togglePlayer = (wId,mId,type) => {
     save({...data,twWeeks:(data.twWeeks||[]).map(w=>{
@@ -1532,11 +1551,13 @@ function PlayerView({ data, onBack }) {
     : ranking;
 
   const weeks = data.twWeeks || [];
+  const ins = data.insignias || { queue: [], delivered: [] };
 
   const tabs = [
     { id: "ranking", label: "Ranking" },
     { id: "membros", label: "Membros" },
     { id: "tw", label: "TW" },
+    { id: "insignias", label: "Insígnias" },
   ];
 
   return (
@@ -1716,6 +1737,63 @@ function PlayerView({ data, onBack }) {
         </div>
       )}
 
+      {/* INSIGNIAS TAB */}
+      {viewTab === "insignias" && (
+        <div>
+          {/* Rules */}
+          <div className="card" style={{marginBottom:14}}>
+            <div className="card-t"><span>Regras — Insígnias Intrépidas (35k Fama)</span></div>
+            {["Ter 6 provas.","Participar de todos eventos.","Disponibilizar as contas em caso de ausência (responsabilidade da staff).","Ter no mínimo 5 presenças.","Em caso de empate = sorteio entre os players."].map((r,i)=>(
+              <div key={i} style={{display:"flex",gap:10,padding:"6px 8px",fontSize:".85rem",alignItems:"flex-start"}}>
+                <span style={{fontFamily:"'Cinzel',serif",fontSize:".7rem",fontWeight:700,color:"var(--gold)",flexShrink:0,width:20,textAlign:"center"}}>{i+1}.</span>
+                <span style={{color:"var(--text)",lineHeight:1.5}}>{r}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Queue */}
+          <div className="card" style={{marginBottom:14}}>
+            <div className="card-t"><span>Fila de Solicitação ({(ins.queue||[]).length})</span></div>
+            {(ins.queue||[]).length === 0 ? <div className="empty">Fila vazia.</div>
+              : <div className="tbl"><table>
+                <thead><tr><th>#</th><th>Nome</th><th>Classe</th><th>Arma</th><th>Desde</th></tr></thead>
+                <tbody>
+                  {(ins.queue||[]).map((q,idx)=>(
+                    <tr key={q.id}>
+                      <td style={{fontFamily:"'Cinzel',serif",fontWeight:700,color:"var(--gold)",textAlign:"center",fontSize:"1rem"}}>{idx+1}º</td>
+                      <td style={{fontWeight:600}}>{q.name}</td>
+                      <td><span className="badge" style={{background:cc(q.class)+"22",color:cc(q.class),border:`1px solid ${cc(q.class)}55`}}>{q.class}</span></td>
+                      <td style={{color:"var(--gold)",fontWeight:600}}>{q.weapon||"—"}</td>
+                      <td style={{fontSize:".82rem",color:"var(--text-d)"}}>{q.addedAt}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table></div>
+            }
+          </div>
+
+          {/* Delivered */}
+          <div className="card">
+            <div className="card-t"><span>Armas Entregues ({(ins.delivered||[]).length})</span></div>
+            {(ins.delivered||[]).length === 0 ? <div className="empty">Nenhuma arma entregue ainda.</div>
+              : <div className="tbl"><table>
+                <thead><tr><th>Nome</th><th>Classe</th><th>Arma</th><th>Entregue em</th></tr></thead>
+                <tbody>
+                  {(ins.delivered||[]).map(d=>(
+                    <tr key={d.id} style={{opacity:.75}}>
+                      <td style={{fontWeight:600}}>{d.name}</td>
+                      <td><span className="badge" style={{background:cc(d.class)+"22",color:cc(d.class),border:`1px solid ${cc(d.class)}55`}}>{d.class}</span></td>
+                      <td style={{color:"var(--gold)",fontWeight:600}}>{d.weapon||"—"}</td>
+                      <td style={{fontSize:".82rem",color:"var(--green-l)",fontWeight:600}}>{d.deliveredAt}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table></div>
+            }
+          </div>
+        </div>
+      )}
+
       {/* Footer */}
       <div style={{ textAlign: "center", padding: "20px 0", fontSize: ".75rem", color: "var(--text-d)" }}>
         Dúvidas? Fale com um membro da staff.
@@ -1734,7 +1812,7 @@ function AccountsTab({ data, save }) {
   const disponivel = accounts.filter(a => a.status === "disponivel" || !a.borrower);
   const emprestado = accounts.filter(a => a.status === "emprestado" && a.borrower);
 
-  const remove = (id) => save({...data, lentAccounts: accounts.filter(a => a.id !== id)});
+  const remove = (id) => { const a = accounts.find(x=>x.id===id); save({...data, lentAccounts: accounts.filter(a => a.id !== id)}, `Removeu conta "${a?.charName||id}" do 0800`); };
   const toggleReveal = (id) => setReveals(r => ({...r, [id]: !r[id]}));
 
   const startEdit = (a) => {
@@ -1743,6 +1821,10 @@ function AccountsTab({ data, save }) {
   };
 
   const saveEdit = () => {
+    const acc = accounts.find(a=>a.id===editId);
+    const action = form.borrower.trim() && !acc?.borrower
+      ? `Emprestou "${acc?.charName}" para "${form.borrower}"`
+      : `Editou conta "${acc?.charName}"`;
     save({...data, lentAccounts: accounts.map(a => {
       if (a.id !== editId) return a;
       return {
@@ -1751,15 +1833,16 @@ function AccountsTab({ data, save }) {
         status: form.borrower.trim() ? "emprestado" : "disponivel",
         since: form.borrower.trim() && !a.borrower ? new Date().toISOString().split("T")[0] : a.since,
       };
-    })});
+    })}, action);
     setEditId(null);
   };
 
   const devolver = (id) => {
+    const a = accounts.find(x=>x.id===id);
     save({...data, lentAccounts: accounts.map(a => {
       if (a.id !== id) return a;
       return { ...a, borrower: "", status: "disponivel" };
-    })});
+    })}, `Devolveu conta "${a?.charName}"`);
   };
 
   const renderRow = (a) => {
@@ -1832,6 +1915,313 @@ function AccountsTab({ data, save }) {
           </table></div>
         }
       </div>
+    </div>
+  );
+}
+
+/* ═══════════════ INSIGNIAS ═══════════════ */
+function InsigniasTab({ data, save }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [search, setSearch] = useState("");
+  const [selectedMember, setSelectedMember] = useState("");
+  const [weapon, setWeapon] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const ins = data.insignias || { queue: [], delivered: [] };
+  const queue = ins.queue || [];
+  const delivered = ins.delivered || [];
+
+  // Members not already in queue or delivered
+  const available = data.members.filter(m =>
+    !queue.some(q => q.memberId === m.id) &&
+    !delivered.some(d => d.memberId === m.id)
+  );
+
+  const filteredAvailable = search
+    ? available.filter(m => m.name.toLowerCase().includes(search.toLowerCase()))
+    : available;
+
+  const addToQueue = () => {
+    if (!selectedMember) return;
+    const m = data.members.find(x => x.id === Number(selectedMember));
+    if (!m) return;
+    const entry = {
+      id: Date.now(),
+      memberId: m.id,
+      name: m.name,
+      class: m.class,
+      weapon: weapon || "—",
+      notes: notes || "",
+      addedAt: new Date().toISOString().split("T")[0],
+      position: queue.length + 1,
+    };
+    save({
+      ...data,
+      insignias: { ...ins, queue: [...queue, entry] }
+    }, `Adicionou "${m.name}" à fila de insígnias`);
+    setSelectedMember(""); setWeapon(""); setNotes(""); setShowAdd(false);
+  };
+
+  const removeFromQueue = (id) => {
+    const entry = queue.find(q => q.id === id);
+    save({
+      ...data,
+      insignias: { ...ins, queue: queue.filter(q => q.id !== id) }
+    }, `Removeu "${entry?.name||id}" da fila de insígnias`);
+  };
+
+  const markDelivered = (id) => {
+    const entry = queue.find(q => q.id === id);
+    if (!entry) return;
+    const deliveredEntry = {
+      ...entry,
+      deliveredAt: new Date().toISOString().split("T")[0],
+    };
+    save({
+      ...data,
+      insignias: {
+        queue: queue.filter(q => q.id !== id),
+        delivered: [deliveredEntry, ...delivered],
+      }
+    }, `Entregou insígnia para "${entry.name}" (${entry.weapon})`);
+  };
+
+  const moveInQueue = (id, dir) => {
+    const idx = queue.findIndex(q => q.id === id);
+    if (idx < 0) return;
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= queue.length) return;
+    const newQueue = [...queue];
+    [newQueue[idx], newQueue[newIdx]] = [newQueue[newIdx], newQueue[idx]];
+    save({ ...data, insignias: { ...ins, queue: newQueue } });
+  };
+
+  const undoDelivery = (id) => {
+    const entry = delivered.find(d => d.id === id);
+    if (!entry) return;
+    const { deliveredAt, ...queueEntry } = entry;
+    save({
+      ...data,
+      insignias: {
+        queue: [...queue, queueEntry],
+        delivered: delivered.filter(d => d.id !== id),
+      }
+    }, `Desfez entrega de "${entry.name}"`);
+  };
+
+  const RULES = [
+    "Ter 6 provas.",
+    "Participar de todos eventos.",
+    "Disponibilizar as contas em caso de ausência (responsabilidade da staff).",
+    "Ter no mínimo 5 presenças.",
+    "Em caso de empate = sorteio entre os players.",
+  ];
+
+  return (
+    <div>
+      {/* RULES */}
+      <div className="card" style={{marginBottom:14}}>
+        <div className="card-t">
+          <span>Regras para Retirada — Insígnias Intrépidas (35k Fama)</span>
+        </div>
+        <div style={{padding:"4px 0"}}>
+          {RULES.map((r, i) => (
+            <div key={i} style={{display:"flex",gap:10,padding:"6px 8px",fontSize:".85rem",alignItems:"flex-start"}}>
+              <span style={{fontFamily:"'Cinzel',serif",fontSize:".7rem",fontWeight:700,color:"var(--gold)",flexShrink:0,marginTop:1,width:20,textAlign:"center"}}>{i+1}.</span>
+              <span style={{color:"var(--text)",lineHeight:1.5}}>{r}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* QUEUE */}
+      <div className="card" style={{marginBottom:14}}>
+        <div className="card-t">
+          <span>Fila de Solicitação ({queue.length})</span>
+          <button className="btn" onClick={()=>setShowAdd(!showAdd)}>{Ico.plus} Adicionar à Fila</button>
+        </div>
+
+        {showAdd && (
+          <div className="form-box">
+            <div className="fr">
+              <div className="fg" style={{flex:2}}>
+                <label>Membro</label>
+                <select value={selectedMember} onChange={e=>setSelectedMember(e.target.value)}>
+                  <option value="">— Selecionar membro —</option>
+                  {filteredAvailable.sort((a,b)=>a.name.localeCompare(b.name)).map(m => (
+                    <option key={m.id} value={m.id}>[{m.class}] {m.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="fg">
+                <label>Arma Desejada</label>
+                <input value={weapon} onChange={e=>setWeapon(e.target.value)} placeholder="Ex: Lança, Espada, Arco..."/>
+              </div>
+              <div className="fg">
+                <label>Obs</label>
+                <input value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Observação"/>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn" onClick={addToQueue} disabled={!selectedMember}>{Ico.check} Adicionar</button>
+              <button className="btn btn-d" onClick={()=>setShowAdd(false)}>Cancelar</button>
+            </div>
+          </div>
+        )}
+
+        {queue.length === 0 ? (
+          <div className="empty">Fila vazia — nenhuma solicitação pendente.</div>
+        ) : (
+          <div className="tbl"><table>
+            <thead><tr><th style={{width:40}}>#</th><th>Nome</th><th>Classe</th><th>Arma</th><th>Solicitado em</th><th>Obs</th><th></th></tr></thead>
+            <tbody>
+              {queue.map((q, idx) => (
+                <tr key={q.id}>
+                  <td style={{fontFamily:"'Cinzel',serif",fontWeight:700,color:"var(--gold)",textAlign:"center",fontSize:"1rem"}}>
+                    {idx + 1}º
+                  </td>
+                  <td style={{fontWeight:600}}>{q.name}</td>
+                  <td><span className="badge" style={{background:cc(q.class)+"22",color:cc(q.class),border:`1px solid ${cc(q.class)}55`}}>{q.class}</span></td>
+                  <td style={{color:"var(--gold)",fontWeight:600}}>{q.weapon||"—"}</td>
+                  <td style={{fontSize:".82rem",color:"var(--text-d)"}}>{q.addedAt}</td>
+                  <td style={{fontSize:".82rem",color:"var(--text-d)",fontStyle:"italic"}}>{q.notes||"—"}</td>
+                  <td style={{whiteSpace:"nowrap"}}>
+                    <button className="btn btn-s" onClick={()=>moveInQueue(q.id,-1)} disabled={idx===0} style={{marginRight:2,opacity:idx===0?.3:1}} title="Subir">▲</button>
+                    <button className="btn btn-s" onClick={()=>moveInQueue(q.id,1)} disabled={idx===queue.length-1} style={{marginRight:4,opacity:idx===queue.length-1?.3:1}} title="Descer">▼</button>
+                    <button className="btn btn-s btn-green" onClick={()=>markDelivered(q.id)} style={{marginRight:4}} title="Marcar como entregue">✓ Entregar</button>
+                    <button className="btn btn-s btn-d" onClick={()=>removeFromQueue(q.id)} title="Remover da fila">{Ico.trash}</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>
+        )}
+      </div>
+
+      {/* DELIVERED */}
+      <div className="card">
+        <div className="card-t">
+          <span>Armas Entregues ({delivered.length})</span>
+        </div>
+        {delivered.length === 0 ? (
+          <div className="empty">Nenhuma arma entregue ainda.</div>
+        ) : (
+          <div className="tbl"><table>
+            <thead><tr><th>Nome</th><th>Classe</th><th>Arma</th><th>Solicitado</th><th>Entregue</th><th>Obs</th><th></th></tr></thead>
+            <tbody>
+              {delivered.map(d => (
+                <tr key={d.id} style={{opacity:.75}}>
+                  <td style={{fontWeight:600}}>{d.name}</td>
+                  <td><span className="badge" style={{background:cc(d.class)+"22",color:cc(d.class),border:`1px solid ${cc(d.class)}55`}}>{d.class}</span></td>
+                  <td style={{color:"var(--gold)",fontWeight:600}}>{d.weapon||"—"}</td>
+                  <td style={{fontSize:".82rem",color:"var(--text-d)"}}>{d.addedAt}</td>
+                  <td style={{fontSize:".82rem",color:"var(--green-l)",fontWeight:600}}>{d.deliveredAt}</td>
+                  <td style={{fontSize:".82rem",color:"var(--text-d)",fontStyle:"italic"}}>{d.notes||"—"}</td>
+                  <td><button className="btn btn-s" onClick={()=>undoDelivery(d.id)} title="Desfazer entrega" style={{fontSize:".5rem"}}>↩ Desfazer</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════ LOGS ═══════════════ */
+function LogsTab({ data, save }) {
+  const [filter, setFilter] = useState("");
+  const [userFilter, setUserFilter] = useState("");
+  const logs = toArr(data.logs || []);
+
+  const staffUsers = [...new Set(logs.map(l => l.user).filter(Boolean))];
+
+  const filtered = logs.filter(l => {
+    if (userFilter && l.user !== userFilter) return false;
+    if (filter && !l.action?.toLowerCase().includes(filter.toLowerCase())) return false;
+    return true;
+  });
+
+  const clearLogs = () => {
+    save({ ...data, logs: [] }, "Limpou o histórico de logs");
+  };
+
+  const formatDate = (ts) => {
+    try {
+      const d = new Date(ts);
+      const pad = n => String(n).padStart(2, "0");
+      return `${pad(d.getDate())}/${pad(d.getMonth()+1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    } catch { return ts; }
+  };
+
+  // Group by date
+  const groupByDay = (logs) => {
+    const groups = {};
+    logs.forEach(l => {
+      const day = l.ts ? l.ts.split("T")[0] : "unknown";
+      if (!groups[day]) groups[day] = [];
+      groups[day].push(l);
+    });
+    return groups;
+  };
+
+  const groups = groupByDay(filtered);
+  const days = Object.keys(groups).sort().reverse();
+
+  const dayLabel = (day) => {
+    const today = new Date().toISOString().split("T")[0];
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+    if (day === today) return "Hoje";
+    if (day === yesterday) return "Ontem";
+    try {
+      const d = new Date(day + "T12:00");
+      const months = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+      return `${d.getDate()} ${months[d.getMonth()]}`;
+    } catch { return day; }
+  };
+
+  return (
+    <div className="card">
+      <div className="card-t">
+        <span style={{display:"flex",alignItems:"center",gap:8}}>{Ico.clock} Histórico de Ações</span>
+        <div style={{display:"flex",gap:6}}>
+          <span className="badge b-gold">{logs.length} registros</span>
+          {logs.length > 0 && <button className="btn btn-s btn-d" onClick={clearLogs}>{Ico.trash} Limpar</button>}
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+        <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="Buscar ação..."
+          style={{flex:1,minWidth:150,padding:"6px 10px",fontSize:".85rem"}} />
+        <select value={userFilter} onChange={e=>setUserFilter(e.target.value)} style={{padding:"6px 10px",fontSize:".85rem"}}>
+          <option value="">Todos os staffs</option>
+          {staffUsers.map(u => <option key={u} value={u}>{u}</option>)}
+        </select>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="empty">{logs.length === 0 ? "Nenhuma ação registrada ainda." : "Nenhuma ação encontrada com esses filtros."}</div>
+      ) : (
+        days.map(day => (
+          <div key={day} style={{marginBottom:16}}>
+            <div style={{fontFamily:"'Cinzel',serif",fontSize:".6rem",letterSpacing:2,textTransform:"uppercase",color:"var(--gold-d)",marginBottom:6,paddingBottom:4,borderBottom:"1px solid var(--border)"}}>
+              {dayLabel(day)}
+            </div>
+            {groups[day].map((l, i) => (
+              <div key={i} style={{display:"flex",gap:10,padding:"6px 8px",fontSize:".82rem",borderBottom:"1px solid var(--border)",alignItems:"center"}}>
+                <span style={{fontSize:".7rem",color:"var(--text-d)",fontFamily:"monospace",flexShrink:0,minWidth:42}}>
+                  {formatDate(l.ts).split(" ")[1]}
+                </span>
+                <span style={{fontWeight:600,color:"var(--gold)",fontSize:".75rem",flexShrink:0,minWidth:60,fontFamily:"'Cinzel',serif",letterSpacing:1}}>
+                  {l.user}
+                </span>
+                <span style={{flex:1,color:"var(--text)"}}>{l.action}</span>
+              </div>
+            ))}
+          </div>
+        ))
+      )}
     </div>
   );
 }
