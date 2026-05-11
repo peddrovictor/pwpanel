@@ -1659,7 +1659,7 @@ function PlayerView({ data, onBack }) {
               style={{ width: "100%", maxWidth: 300, padding: "7px 10px", fontSize: ".85rem" }} />
           </div>
           <div className="tbl"><table>
-            <thead><tr><th>Nome</th><th>Classe</th><th>Nível</th><th>Cultivo</th><th>Obs</th></tr></thead>
+            <thead><tr><th>Nome</th><th>Classe</th><th>Nível</th><th>Cultivo</th></tr></thead>
             <tbody>
               {(search ? data.members.filter(m => m.name.toLowerCase().includes(search.toLowerCase())) : data.members)
                 .sort((a, b) => a.name.localeCompare(b.name))
@@ -1669,7 +1669,6 @@ function PlayerView({ data, onBack }) {
                     <td><span className="badge" style={{ background: cc(m.class) + "22", color: cc(m.class), border: `1px solid ${cc(m.class)}55` }}>{m.class}</span></td>
                     <td>{m.level}</td>
                     <td><span className="badge b-gold">{m.cultivo}</span></td>
-                    <td style={{ fontSize: ".82rem", color: m.obs ? "var(--gold)" : "var(--text-d)", fontWeight: m.obs ? 600 : 400 }}>{m.obs || "—"}</td>
                   </tr>
                 ))}
             </tbody>
