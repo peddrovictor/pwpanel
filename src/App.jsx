@@ -1554,8 +1554,7 @@ function PlayerView({ data, onBack }) {
   const ins = data.insignias || { queue: [], delivered: [] };
 
   const tabs = [
-    { id: "ranking", label: "Ranking" },
-    { id: "membros", label: "Membros" },
+    { id: "ranking", label: "Presenças" },
     { id: "tw", label: "TW" },
     { id: "insignias", label: "Insígnias" },
   ];
@@ -1566,27 +1565,9 @@ function PlayerView({ data, onBack }) {
         <h1>ROMA</h1>
         <div className="sub">Perfect World — Painel do Clã</div>
         <div className="hdr-row">
-          <span className="hdr-stat">{data.members.length} membros</span>
           <button className="logout-btn" onClick={onBack}>← Voltar</button>
         </div>
       </header>
-
-      {/* Class summary */}
-      <div className="card" style={{ marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <div style={{ fontFamily: "'Cinzel',serif", fontSize: ".7rem", letterSpacing: 2, textTransform: "uppercase", color: "var(--gold)", marginRight: 8 }}>
-            <span style={{ fontSize: "1.2rem", fontWeight: 700, marginRight: 4 }}>{data.members.length}</span>membros
-          </div>
-          <div style={{ width: 1, height: 24, background: "var(--border-g)" }} />
-          {CLASSES.map(c => classCounts[c] > 0 && (
-            <div key={c} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ width: 10, height: 10, borderRadius: 2, background: cc(c), display: "inline-block" }} />
-              <span style={{ fontFamily: "'Cinzel',serif", fontSize: ".7rem", fontWeight: 700, color: cc(c), letterSpacing: 1 }}>{c}</span>
-              <span style={{ fontSize: ".8rem", fontWeight: 600, color: "var(--text)" }}>{classCounts[c]}</span>
-            </div>
-          ))}
-        </div>
-      </div>
 
       {/* Tabs */}
       <nav className="tabs">
@@ -1614,7 +1595,7 @@ function PlayerView({ data, onBack }) {
                   style={{ width: "100%", maxWidth: 300, padding: "7px 10px", fontSize: ".85rem" }} />
               </div>
               <div className="tbl"><table>
-                <thead><tr><th>#</th><th>Nome</th><th>Classe</th><th>TW</th><th>W.Boss</th><th>Marcial</th><th>Total</th><th>%</th></tr></thead>
+                <thead><tr><th>#</th><th>Nome</th><th>Nível</th><th>TW</th><th>W.Boss</th><th>Marcial</th><th>Total</th><th>%</th></tr></thead>
                 <tbody>
                   {filtered.map((m, i) => {
                     const realIdx = ranking.indexOf(m);
@@ -1627,7 +1608,7 @@ function PlayerView({ data, onBack }) {
                           {realIdx < 3 ? ["🥇", "🥈", "🥉"][realIdx] : realIdx + 1}
                         </td>
                         <td style={{ fontWeight: 600 }}>{m.name}</td>
-                        <td><span className="badge" style={{ background: cc(m.class) + "22", color: cc(m.class), border: `1px solid ${cc(m.class)}55` }}>{m.class}</span></td>
+                        <td>{m.level}</td>
                         <td style={{ fontSize: ".8rem" }}>{twT > 0 ? <span style={{ color: twC > 0 ? "var(--text)" : "var(--text-d)" }}>{twC}/{twT}</span> : "—"}</td>
                         <td style={{ fontSize: ".8rem" }}>{wbT > 0 ? <span style={{ color: wbC > 0 ? "var(--text)" : "var(--text-d)" }}>{wbC}/{wbT}</span> : "—"}</td>
                         <td style={{ fontSize: ".8rem" }}>{mcT > 0 ? <span style={{ color: mcC > 0 ? "var(--text)" : "var(--text-d)" }}>{mcC}/{mcT}</span> : "—"}</td>
@@ -1650,88 +1631,17 @@ function PlayerView({ data, onBack }) {
         </div>
       )}
 
-      {/* MEMBROS TAB */}
-      {viewTab === "membros" && (
-        <div className="card">
-          <div className="card-t"><span>Membros do Clã</span></div>
-          <div style={{ marginBottom: 10 }}>
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nome..."
-              style={{ width: "100%", maxWidth: 300, padding: "7px 10px", fontSize: ".85rem" }} />
-          </div>
-          <div className="tbl"><table>
-            <thead><tr><th>Nome</th><th>Classe</th><th>Nível</th><th>Cultivo</th></tr></thead>
-            <tbody>
-              {(search ? data.members.filter(m => m.name.toLowerCase().includes(search.toLowerCase())) : data.members)
-                .sort((a, b) => a.name.localeCompare(b.name))
-                .map(m => (
-                  <tr key={m.id}>
-                    <td style={{ fontWeight: 600 }}>{m.name}</td>
-                    <td><span className="badge" style={{ background: cc(m.class) + "22", color: cc(m.class), border: `1px solid ${cc(m.class)}55` }}>{m.class}</span></td>
-                    <td>{m.level}</td>
-                    <td><span className="badge b-gold">{m.cultivo}</span></td>
-                  </tr>
-                ))}
-            </tbody>
-          </table></div>
-        </div>
-      )}
-
       {/* TW TAB */}
       {viewTab === "tw" && (
         <div className="card">
-          <div className="card-t"><span>Controle de TW</span></div>
-          {weeks.length === 0 ? <div className="empty">Nenhuma TW registrada.</div>
-            : weeks.map(week => {
-              const conf = week.confirmed || [];
-              const decl = week.declined || [];
-              const confM = data.members.filter(m => conf.includes(m.id));
-              const declM = data.members.filter(m => decl.includes(m.id));
-              const confClassCounts = CLASSES.reduce((a, c) => { a[c] = confM.filter(m => m.class === c).length; return a; }, {});
-              return (
-                <div key={week.id} style={{ marginBottom: 12, background: "var(--bg-i)", border: "1px solid var(--border)", borderRadius: 4, padding: 14 }}>
-                  <div style={{ fontFamily: "'Cinzel',serif", fontWeight: 700, fontSize: ".85rem", color: "var(--gold)", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-                    <span>{week.label}</span>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <span className="badge b-green">{conf.length} vão</span>
-                      <span className="badge b-red">{decl.length} não vão</span>
-                    </div>
-                  </div>
-                  {confM.length > 0 && (
-                    <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
-                      {CLASSES.map(c => confClassCounts[c] > 0 && (
-                        <span key={c} style={{ fontSize: ".6rem", padding: "2px 6px", borderRadius: 2, background: cc(c) + "18", color: cc(c), border: `1px solid ${cc(c)}40`, fontFamily: "'Cinzel',serif", letterSpacing: 1, fontWeight: 600 }}>
-                          {confClassCounts[c]}x {c}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  <div className="tw-cols">
-                    <div>
-                      <div className="tw-col-h go">Confirmados ({confM.length})</div>
-                      {confM.length === 0 ? <div style={{ fontSize: ".8rem", color: "var(--text-d)", fontStyle: "italic", padding: "4px 8px" }}>—</div>
-                        : confM.sort((a, b) => a.class.localeCompare(b.class)).map(m => (
-                          <div key={m.id} className="tw-player go">
-                            <span style={{ color: "var(--green-l)", marginRight: 4 }}>●</span>
-                            <span style={{ fontWeight: 600, flex: 1 }}>{m.name}</span>
-                            <span style={{ fontSize: ".7rem", color: cc(m.class), fontFamily: "'Cinzel',serif" }}>{m.class}</span>
-                          </div>
-                        ))}
-                    </div>
-                    <div>
-                      <div className="tw-col-h no">Não Participam ({declM.length})</div>
-                      {declM.length === 0 ? <div style={{ fontSize: ".8rem", color: "var(--text-d)", fontStyle: "italic", padding: "4px 8px" }}>—</div>
-                        : declM.map(m => (
-                          <div key={m.id} className="tw-player no">
-                            <span style={{ color: "var(--red-l)", marginRight: 4 }}>●</span>
-                            <span style={{ flex: 1 }}>{m.name}</span>
-                            <span style={{ fontSize: ".7rem" }}>{m.class}</span>
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-                </div>
-              );
-            })
+          <div className="card-t"><span>Guerra de Território</span></div>
+          {weeks.length === 0 ? <div className="empty">Nenhuma TW agendada no momento.</div>
+            : (
+              <div style={{textAlign:"center",padding:"30px 16px"}}>
+                <div style={{fontFamily:"'Cinzel',serif",fontSize:".7rem",letterSpacing:3,textTransform:"uppercase",color:"var(--text-d)",marginBottom:8}}>Próxima TW</div>
+                <div style={{fontFamily:"'Cinzel',serif",fontSize:"1.6rem",fontWeight:900,color:"var(--gold)",letterSpacing:3}}>{weeks[0].label}</div>
+              </div>
+            )
           }
         </div>
       )}
@@ -2233,6 +2143,8 @@ function StaffTab() {
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
   const [reveals, setReveals] = useState({});
+  const [editUser, setEditUser] = useState(null);
+  const [newPass, setNewPass] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -2254,6 +2166,14 @@ function StaffTab() {
   const removeStaff = async (u) => await saveAccounts(accounts.filter(a=>a.user!==u));
   const toggleReveal = (u) => setReveals(r=>({...r,[u]:!r[u]}));
 
+  const startEditPass = (u, currentPass) => { setEditUser(u); setNewPass(currentPass); };
+  const savePass = async () => {
+    if (newPass.length < 4) { setOk(""); setErr("Senha deve ter no mínimo 4 caracteres."); setTimeout(()=>setErr(""),3000); return; }
+    await saveAccounts(accounts.map(a => a.user === editUser ? {...a, pass: newPass} : a));
+    setOk("Senha de \""+editUser+"\" alterada!"); setEditUser(null); setNewPass("");
+    setTimeout(()=>setOk(""),3000);
+  };
+
   return (
     <div className="card">
       <div className="card-t">
@@ -2261,9 +2181,9 @@ function StaffTab() {
         <button className="btn" onClick={()=>{setShow(!show);setErr("");setOk("");}}>{Ico.plus} Nova Conta</button>
       </div>
       {ok&&<div style={{color:"var(--green-l)",fontSize:".85rem",marginBottom:10,padding:"8px 12px",background:"rgba(56,121,74,.08)",borderRadius:3}}>{ok}</div>}
+      {err&&<div style={{color:"var(--red-l)",fontSize:".85rem",marginBottom:10,padding:"8px 12px",background:"rgba(155,44,44,.08)",borderRadius:3}}>{err}</div>}
       {show&&(
         <div className="form-box">
-          {err&&<div style={{color:"var(--red-l)",fontSize:".85rem",marginBottom:8}}>{err}</div>}
           <div className="fr">
             <div className="fg"><label>Usuário</label><input value={form.user} onChange={e=>setForm({...form,user:e.target.value})} placeholder="Login do staff"/></div>
             <div className="fg"><label>Senha</label><input value={form.pass} onChange={e=>setForm({...form,pass:e.target.value})} placeholder="Mínimo 4 caracteres"/></div>
@@ -2278,17 +2198,33 @@ function StaffTab() {
         <thead><tr><th>Usuário</th><th>Senha</th><th>Acesso</th><th></th></tr></thead>
         <tbody>
           {accounts.map(a=>(
-            <tr key={a.user}>
+            <tr key={a.user} style={editUser===a.user?{background:"rgba(201,168,76,.05)"}:{}}>
               <td style={{fontWeight:600}}>{a.user}</td>
-              <td><div className="pw-wrap">{reveals[a.user]?<span style={{fontFamily:"monospace",fontSize:".85rem"}}>{a.pass}</span>:<span className="pw-mask">••••••</span>}<button className="pw-toggle" onClick={()=>toggleReveal(a.user)}>{reveals[a.user]?Ico.eyeOff:Ico.eye}</button></div></td>
+              <td>
+                {editUser===a.user ? (
+                  <div style={{display:"flex",alignItems:"center",gap:4}}>
+                    <input value={newPass} onChange={e=>setNewPass(e.target.value)} style={{padding:"4px 6px",fontSize:".85rem",width:120}} placeholder="Nova senha"/>
+                    <button className="btn btn-s btn-green" onClick={savePass}>{Ico.check}</button>
+                    <button className="btn btn-s btn-d" onClick={()=>setEditUser(null)}>✗</button>
+                  </div>
+                ) : (
+                  <div className="pw-wrap">
+                    {reveals[a.user]?<span style={{fontFamily:"monospace",fontSize:".85rem"}}>{a.pass}</span>:<span className="pw-mask">••••••</span>}
+                    <button className="pw-toggle" onClick={()=>toggleReveal(a.user)}>{reveals[a.user]?Ico.eyeOff:Ico.eye}</button>
+                  </div>
+                )}
+              </td>
               <td><span className={"badge "+(a.role==="admin"?"b-gold":"b-blue")}>{a.role==="admin"?"ADMIN":"STAFF"}</span></td>
-              <td>{a.role!=="admin"&&<button className="btn btn-s btn-d" onClick={()=>removeStaff(a.user)}>{Ico.trash} Remover</button>}</td>
+              <td style={{whiteSpace:"nowrap"}}>
+                {editUser!==a.user && <button className="btn btn-s" onClick={()=>startEditPass(a.user, a.pass)} style={{marginRight:4}} title="Alterar senha">{Ico.edit}</button>}
+                {a.role!=="admin"&&<button className="btn btn-s btn-d" onClick={()=>removeStaff(a.user)}>{Ico.trash}</button>}
+              </td>
             </tr>
           ))}
         </tbody>
       </table></div>
       <div style={{marginTop:12,padding:"10px 12px",background:"var(--bg)",borderRadius:3,fontSize:".8rem",color:"var(--text-d)",lineHeight:1.6}}>
-        Apenas o <strong style={{color:"var(--gold)"}}>ADMIN</strong> pode criar e remover contas de staff.
+        Apenas o <strong style={{color:"var(--gold)"}}>ADMIN</strong> pode criar, remover e alterar senhas de contas.
       </div>
     </div>
   );
