@@ -1652,7 +1652,7 @@ function PlayerView({ data, onBack }) {
           {/* Rules */}
           <div className="card" style={{marginBottom:14}}>
             <div className="card-t"><span>Regras — Insígnias Intrépidas (35k Fama)</span></div>
-            {["Ter 6 provas.","Participar de todos eventos.","Disponibilizar as contas em caso de ausência (responsabilidade da staff).","Ter no mínimo 5 presenças.","Em caso de empate = sorteio entre os players."].map((r,i)=>(
+            {["Ter 6 provas.","Participar de todos eventos.","Disponibilizar as contas em caso de ausência (responsabilidade da staff).","Ter no mínimo 5 presenças.","O player terá direito a uma única retirada de intrépidas","Em caso de empate = sorteio entre os players."].map((r,i)=>(
               <div key={i} style={{display:"flex",gap:10,padding:"6px 8px",fontSize:".85rem",alignItems:"flex-start"}}>
                 <span style={{fontFamily:"'Cinzel',serif",fontSize:".7rem",fontWeight:700,color:"var(--gold)",flexShrink:0,width:20,textAlign:"center"}}>{i+1}.</span>
                 <span style={{color:"var(--text)",lineHeight:1.5}}>{r}</span>
@@ -1923,6 +1923,7 @@ function InsigniasTab({ data, save }) {
     "Participar de todos eventos.",
     "Disponibilizar as contas em caso de ausência (responsabilidade da staff).",
     "Ter no mínimo 5 presenças.",
+    "O player terá direito a uma única retirada de intrépidas.",
     "Em caso de empate = sorteio entre os players.",
   ];
 
